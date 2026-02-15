@@ -41,10 +41,6 @@ print(f"Images    : {len(samples)}")
 print(f"Classes   : {class_map}")
 print("="*60)
 
-# --------------------------------------------------
-# LOAD PKL AND READ SIZES FROM IT
-# --------------------------------------------------
-
 with open(MODEL_PKL, "rb") as f:
     ckpt = pickle.load(f)
 
@@ -71,7 +67,7 @@ print(f"  fc2   : {fc2_in}->{fc2_out}")
 print("="*60)
 
 import math
-target = fc1_in // conv2_out   
+target = fc1_in // conv2_out  
 side = int(math.isqrt(target))
 IMG_SIZE = (side*2 + 2)*2 + 2
 print(f"  Inferred image size: {IMG_SIZE}x{IMG_SIZE}")
