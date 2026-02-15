@@ -12,8 +12,9 @@ DATA_PATH = r"C:\Users\ngc\OneDrive - Indian Institute of Technology Bombay\Docu
 SAVE_PATH = r"C:\Users\ngc\OneDrive - Indian Institute of Technology Bombay\Documents\gnr638\Assignment_1\Assignment_1\checkpoints"
 
 
+# ============================================================
+
 def argmax(vec):
-    """Return index of maximum value in a flat list."""
     best_idx = 0
     best_val = vec[0]
     for i in range(1, len(vec)):
@@ -25,31 +26,28 @@ def argmax(vec):
 
 def image_to_3d_list(img):
     """
-    Convert a PIL RGB image (already resized to 32x32) into a
-    3-D Python list  [C][H][W].
+    Convert a PIL RGB image into a 3-D Python list [C][H][W].
     """
-    width, height = img.size          # 32, 32
-    pixels = list(img.getdata())      # list of (R, G, B) tuples, row-major
+    width, height = img.size
+    pixels = list(img.getdata())
 
     mean = [0.485, 0.456, 0.406]
     std  = [0.229, 0.224, 0.225]
 
-    # Allocate [3][32][32]
     data = [[[0.0] * width for _ in range(height)] for _ in range(3)]
 
     for row in range(height):
         for col in range(width):
-            pixel = pixels[row * width + col]   # (R, G, B)  0-255
+            pixel = pixels[row * width + col]
             for c in range(3):
-                v = pixel[c] / 255.0            # [0, 1]
-                v = (v - mean[c]) / std[c]      # ImageNet normalisation
+                v = pixel[c] / 255.0
+                v = (v - mean[c]) / std[c]
                 data[c][row][col] = v
 
     return data
 
 
 def gauss_random(mean, std):
-    """Box-Muller transform for Gaussian random numbers (no numpy)."""
     while True:
         u1 = random.random()
         u2 = random.random()
@@ -68,9 +66,9 @@ class ImageFolderDataset:
         self.samples = samples
 
     def load_image(self, path):
-        img = Image.open(path).convert("RGB").resize((32, 32))
-        data_3d = image_to_3d_list(img)          # pure Python list [3][32][32]
-        return Tensor(data_3d)                   # 3D constructor in C++ backend
+        img = Image.open(path).convert("RGB").resize((22, 22)) 
+        data_3d = image_to_3d_list(img)
+        return Tensor(data_3d)
 
     def __getitem__(self, idx):
         return self.load_image(self.samples[idx][0]), self.samples[idx][1]
@@ -95,7 +93,7 @@ def load_samples(root):
 # ============================================================
 
 print("=" * 70)
-print("OPTIMIZED RGB CNN")
+print("OPTIMIZED CNN")
 print("=" * 70)
 
 os.makedirs(SAVE_PATH, exist_ok=True)
@@ -115,16 +113,14 @@ print(f"Train: {len(train_set)}, Val: {len(val_set)}")
 
 
 # ============================================================
-# MODEL
-# ============================================================
 
 print("\n[2/4] Creating layers...")
 
-conv1 = Conv2DMulti(3, 32, 3)
+conv1 = Conv2DMulti(3, 16, 3)
 relu1 = ReLUMulti()
 pool1 = MaxPool2DMulti(2)
 
-conv2 = Conv2DMulti(32, 64, 3)
+conv2 = Conv2DMulti(16, 32, 3)
 relu2 = ReLUMulti()
 pool2 = MaxPool2DMulti(2)
 
@@ -153,6 +149,7 @@ x = flatten(x)
 flat_size = len(x.data_vec)
 print(f"Flatten size: {flat_size}")
 
+# fc1: 512 -> 128
 fc1 = Linear(flat_size, 128)
 std1 = math.sqrt(2.0 / flat_size)
 fc1.W.data_mat = [
@@ -161,6 +158,7 @@ fc1.W.data_mat = [
 ]
 fc1.b.data_vec = [0.0] * 128
 
+# fc2: 128 -> 100
 fc2 = Linear(128, 100)
 std2 = math.sqrt(2.0 / 128)
 fc2.W.data_mat = [
@@ -172,24 +170,28 @@ fc2.b.data_vec = [0.0] * 100
 print("FC layers initialized.")
 
 
+# ============================================================
+# MODEL COMPLEXITY
+# ============================================================
+
 def count_params_and_macs(in_ch, H, W):
-    # --- conv1: 3 -> 32 filters, 3x3 ---
-    p_conv1   = 32 * 3 * 3 * 3 + 32
-    mac_conv1 = 32 * 3 * 3 * 3 * (H-2) * (W-2)
+    # conv1: 3->16, 3x3
+    p_conv1   = 16 * 3 * 3 * 3 + 16
+    mac_conv1 = 16 * 3 * 3 * 3 * (H-2) * (W-2)
     H1, W1    = (H-2)//2, (W-2)//2
 
-    # --- conv2: 32 -> 64 filters, 3x3 ---
-    p_conv2   = 64 * 32 * 3 * 3 + 64
-    mac_conv2 = 64 * 32 * 3 * 3 * (H1-2) * (W1-2)
+    # conv2: 16->32, 3x3
+    p_conv2   = 32 * 16 * 3 * 3 + 32
+    mac_conv2 = 32 * 16 * 3 * 3 * (H1-2) * (W1-2)
     H2, W2    = (H1-2)//2, (W1-2)//2
 
-    flat      = 64 * H2 * W2
+    flat      = 32 * H2 * W2
 
-    # --- fc1: flat -> 128 ---
+    # fc1: flat->128
     p_fc1     = flat * 128 + 128
     mac_fc1   = flat * 128
 
-    # --- fc2: 128 -> 100 ---
+    # fc2: 128->100
     p_fc2     = 128 * 100 + 100
     mac_fc2   = 128 * 100
 
@@ -205,7 +207,7 @@ def count_params_and_macs(in_ch, H, W):
     print(f"  FLOPs per forward pass: {total_flops:,}")
     print("="*50 + "\n")
 
-count_params_and_macs(3, 32, 32)
+count_params_and_macs(3, 22, 22)
 
 
 params = [
@@ -247,16 +249,10 @@ for epoch in range(EPOCHS):
 
         x, y = train_set[i]
 
-        # Forward
-        x = conv1(x)
-        x = relu1(x)
-        x = pool1(x)
-        x = conv2(x)
-        x = relu2(x)
-        x = pool2(x)
+        x = conv1(x);  x = relu1(x);  x = pool1(x)
+        x = conv2(x);  x = relu2(x);  x = pool2(x)
         x = flatten(x)
-        x = fc1(x)
-        x = relu(x)
+        x = fc1(x);    x = relu(x)
         x = fc2(x)
 
         optimizer.zero_grad()
@@ -267,14 +263,12 @@ for epoch in range(EPOCHS):
 
         loss.backward()
         optimizer.step()
-
         loss_sum += loss.data
 
         if (i + 1) % PRINT_EVERY == 0:
             elapsed = time.time() - epoch_start
             rate    = (i + 1) / elapsed
             eta     = (len(train_set) - (i + 1)) / rate
-
             print(
                 f"E{epoch+1:02d} "
                 f"[{i+1:5d}/{len(train_set)}] "
@@ -290,18 +284,11 @@ for epoch in range(EPOCHS):
 
     for i in range(val_samples):
         x, y = val_set[i]
-
-        x = conv1(x)
-        x = relu1(x)
-        x = pool1(x)
-        x = conv2(x)
-        x = relu2(x)
-        x = pool2(x)
+        x = conv1(x);  x = relu1(x);  x = pool1(x)
+        x = conv2(x);  x = relu2(x);  x = pool2(x)
         x = flatten(x)
-        x = fc1(x)
-        x = relu(x)
+        x = fc1(x);    x = relu(x)
         x = fc2(x)
-
         if argmax(x.data_vec) == y:
             vc += 1
 
@@ -317,11 +304,9 @@ for epoch in range(EPOCHS):
     if va > best:
         best       = va
         best_epoch = epoch + 1
-
         model_name = f"best_model_E{epoch+1}_VA{100*va:.2f}.pkl"
-
         with open(os.path.join(SAVE_PATH, model_name), 'wb') as f:
-            checkpoint = {
+            pickle.dump({
                 "conv1_W": conv1.W.data_4d,
                 "conv1_b": conv1.b.data_vec,
                 "conv2_W": conv2.W.data_4d,
@@ -330,10 +315,8 @@ for epoch in range(EPOCHS):
                 "fc1_b":   fc1.b.data_vec,
                 "fc2_W":   fc2.W.data_mat,
                 "fc2_b":   fc2.b.data_vec,
-            }
-            pickle.dump(checkpoint, f)
-
-        print(f"    ✓ Saved {model_name}")
+            }, f)
+        print(f"    Saved {model_name}")
 
     if epoch == 10:
         optimizer.lr = 0.0005
