@@ -49,7 +49,6 @@ struct Tensor {
         is_scalar = false;
         is_vector = true;
     }
-    // ADD THESE CONSTRUCTORS (after line 47, after the matrix constructor):
 
     // 3D constructor
     Tensor(std::vector<std::vector<std::vector<double>>> d3) {
@@ -142,12 +141,6 @@ struct Tensor {
     }
             
         }
-        // ADD THIS in backward_internal (around line 145, after the old "conv" case):
-
-        // ============================================================================
-// OPTIMIZED BACKWARD PASS - Cuts backward time by 60%!
-// ============================================================================
-// Replace the ENTIRE "if (op == "conv_multi")" block with this:
 
 if (op == "conv_multi") {
     // Get references
@@ -168,11 +161,6 @@ if (op == "conv_multi") {
     auto& kernel_grad = right->grad_4d;
     auto& output_grad = grad_3d;
     
-    // ========================================================================
-    // PART 1: Gradient w.r.t. input X (OPTIMIZED)
-    // ========================================================================
-    
-    // Process each output channel
     for (size_t oc = 0; oc < out_ch; oc++) {
         auto& K_oc = K[oc];          // Cache kernel for this output channel
         auto& grad_oc = output_grad[oc];  // Cache gradient for this output channel
@@ -234,9 +222,6 @@ if (op == "conv_multi") {
         }
     }
     
-    // ========================================================================
-    // PART 2: Gradient w.r.t. weights K (OPTIMIZED)
-    // ========================================================================
     
     for (size_t oc = 0; oc < out_ch; oc++) {
         auto& grad_oc = output_grad[oc];  // Cache output gradient
@@ -305,9 +290,6 @@ if (op == "conv_multi") {
         }
     }
     
-    // ========================================================================
-    // PART 3: Gradient w.r.t. bias (already optimal)
-    // ========================================================================
     
     if (bias_ref) {
         for (size_t oc = 0; oc < out_ch; oc++) {
@@ -324,8 +306,7 @@ if (op == "conv_multi") {
         }
     }
 }
-        // ADD THESE in backward_internal (after conv_multi backward):
-
+      
         if (op == "relu3d") {
             size_t C = grad_3d.size();
             size_t H = grad_3d[0].size();
@@ -501,7 +482,6 @@ if (op == "conv_multi") {
 
         backward_internal(visited);
     }
-    // REPLACE zero_grad function (around line 214):
 
     void zero_grad() {
         if (is_scalar) {
@@ -526,7 +506,6 @@ if (op == "conv_multi") {
         }
     }
 
-// REPLACE sgd_step function (around line 227):
 
     void sgd_step(double lr) {
         if (is_scalar) {
@@ -599,7 +578,6 @@ std::shared_ptr<Tensor> mul(std::shared_ptr<Tensor> a,
     out->left = a; out->right = b; out->op = "*";
     return out;
 }
-// ADD THIS FUNCTION (around line 340, before the old conv2d):
 
 std::shared_ptr<Tensor> conv2d_multi(
     std::shared_ptr<Tensor> x,  // [in_ch, H, W]
@@ -698,7 +676,6 @@ std::shared_ptr<Tensor> conv2d_multi(
     return y;
 }
 
-// ADD THESE FUNCTIONS (after conv2d_multi):
 
 // ReLU for 3D tensors
 std::shared_ptr<Tensor> relu3d(std::shared_ptr<Tensor> x) {
@@ -1070,8 +1047,8 @@ PYBIND11_MODULE(backend, m) {
         .def_readwrite("data", &Tensor::data)
         .def_readwrite("data_vec", &Tensor::data_vec)
         .def_readwrite("data_mat", &Tensor::data_mat)
-        .def_readwrite("data_3d", &Tensor::data_3d)  // ADD THIS
-        .def_readwrite("data_4d", &Tensor::data_4d)  // ADD THIS
+        .def_readwrite("data_3d", &Tensor::data_3d)  
+        .def_readwrite("data_4d", &Tensor::data_4d)  
         .def_readwrite("grad", &Tensor::grad)
         .def_readwrite("grad_vec", &Tensor::grad_vec)
         .def_readwrite("grad_mat", &Tensor::grad_mat)
