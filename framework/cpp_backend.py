@@ -28,13 +28,11 @@ try:
     flatten3d = _backend.flatten3d
 except AttributeError:
     print("WARNING: Multi-channel operations not found in C++ backend!")
-    print("Add the 7 code snippets to backend.cpp and recompile.")
     conv2d_multi = None
     relu3d = None
     maxpool3d = None
     flatten3d = None
 
-# Optional: scale_tensor_2d if you added it
 try:
     scale_tensor_2d = _backend.scale_tensor_2d
 except AttributeError:

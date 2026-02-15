@@ -9,7 +9,6 @@ class Conv2DMulti:
         self.out_channels = out_channels
         self.kernel_size = kernel_size
         
-        # CRITICAL FIX: He initialization for ReLU
         # std = sqrt(2 / (in_channels * kernel_size * kernel_size))
         std = (2.0 / (in_channels * kernel_size * kernel_size)) ** 0.5
         
@@ -21,13 +20,11 @@ class Conv2DMulti:
             for _ in range(in_channels):
                 kernel_data = []
                 for _ in range(kernel_size):
-                    # Use Gaussian (not uniform!) with proper std
                     kernel_data.append([random.gauss(0, std) for _ in range(kernel_size)])
                 out_ch_data.append(kernel_data)
             W_data.append(out_ch_data)
         
         self.W = Tensor(W_data)
-        # CRITICAL: Bias should be 0, not 0.1!
         self.b = Tensor([0.0 for _ in range(out_channels)])
         
         print(" Done")

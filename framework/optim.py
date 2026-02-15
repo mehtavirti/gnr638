@@ -5,8 +5,8 @@ class SGD:
 
     def step(self):
         for p in self.params:
-            p.sgd_step(self.lr)   # C++ function - replaces all Python loops
+            p.sgd_step(self.lr)   
 
     def zero_grad(self):
         for p in self.params:
-            p.zero_grad()         # C++ function - replaces all Python loops
+            p.zero_grad()        
