@@ -34,3 +34,4 @@ To test model 2: run
 ```bash
 py model2_eval.py {dataset} best_model.pkl
 ```
+Note : for data2 model and training are both included in train_data2.py while for data1 they are separate
