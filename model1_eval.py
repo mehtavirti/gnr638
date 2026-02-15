@@ -1,54 +1,58 @@
 import sys
-import time
 import os
+import time
 
 from dataset import ImageFolderDataset
-from model1 import SimpleCNN
+from model_data1 import SimpleCNN
 from framework.cpp_backend import Tensor
 from framework.loss import CrossEntropyLoss
 
 
-# --------------------------------------------------
-# ARGUMENTS
-# --------------------------------------------------
+# =====================================================
+# USAGE
+# =====================================================
 
 if len(sys.argv) != 3:
     print("Usage:")
-    print("  py eval_model1.py <test_parent_directory> <model_weights.txt>")
+    print("  python model1_eval.py <test_dataset_root> <model_weights.txt>")
     sys.exit(1)
 
-TEST_ROOT   = sys.argv[1]
-WEIGHTS_TXT = sys.argv[2]
+TEST_ROOT = sys.argv[1]
+WEIGHTS   = sys.argv[2]
+
+print("=" * 60)
+print("MODEL-1 EVALUATION")
+print("=" * 60)
+print("Test Root :", TEST_ROOT)
+print("Weights   :", WEIGHTS)
+print("=" * 60)
 
 
-# --------------------------------------------------
-# LOAD DATASET (subfolder name = label)
-# --------------------------------------------------
+# =====================================================
+# LOAD DATASET
+# =====================================================
 
-dataset = ImageFolderDataset(TEST_ROOT)
+dataset = ImageFolderDataset(TEST_ROOT, preload=False)
+
+print(f"Indexed {len(dataset)} images across {len(dataset.class_map)} classes")
+print("Class map:", dataset.class_map)
+
 num_classes = len(dataset.class_map)
 
-print("="*60)
-print("MODEL-1 EVALUATION")
-print("="*60)
-print(f"Test Root : {TEST_ROOT}")
-print(f"Images    : {len(dataset)}")
-print(f"Classes   : {dataset.class_map}")
-print("="*60)
 
-
-# --------------------------------------------------
-# BUILD MODEL
-# --------------------------------------------------
+# =====================================================
+# LOAD MODEL
+# =====================================================
 
 model = SimpleCNN(num_classes)
+loss_fn = CrossEntropyLoss()
 
 
-# --------------------------------------------------
-# LOAD WEIGHTS
-# --------------------------------------------------
+# =====================================================
+# LOAD WEIGHTS (model_weights.txt)
+# =====================================================
 
-with open(WEIGHTS_TXT) as f:
+with open(WEIGHTS, "r") as f:
     lines = f.readlines()
 
 for line in lines:
@@ -56,71 +60,88 @@ for line in lines:
     if not line:
         continue
 
-    if line.startswith("conv1.W="):
-        model.conv1.W.data_mat = [eval(r) for r in line.replace("conv1.W=","").split(";") if r]
+    if line.startswith("conv.W="):
+        rows = [eval(r) for r in line.replace("conv.W=", "").split(";") if r]
+        model.conv.W.data_mat = rows
 
-    elif line.startswith("conv1.b="):
-        model.conv1.b.data_vec = [float(line.split("=")[1])]
+    elif line.startswith("conv.b="):
+        model.conv.b.data_vec = [float(line.replace("conv.b=", ""))]
 
-    elif line.startswith("conv2.W="):
-        model.conv2.W.data_mat = [eval(r) for r in line.replace("conv2.W=","").split(";") if r]
+    # elif line.startswith("conv2.W="):
+    #     rows = [eval(r) for r in line.replace("conv2.W=", "").split(";") if r]
+    #     model.conv2.W.data_mat = rows
 
-    elif line.startswith("conv2.b="):
-        model.conv2.b.data_vec = [float(line.split("=")[1])]
+    # elif line.startswith("conv2.b="):
+    #     model.conv2.b.data_vec = [float(line.replace("conv2.b=", ""))]
 
     elif line.startswith("fc1.W="):
-        model.fc1.W.data_mat = [eval(r) for r in line.replace("fc1.W=","").split(";") if r]
+        rows = [eval(r) for r in line.replace("fc1.W=", "").split(";") if r]
+        model.fc1.W.data_mat = rows
 
     elif line.startswith("fc1.b="):
-        model.fc1.b.data_vec = [float(x) for x in line.replace("fc1.b=","").split(",") if x]
+        model.fc1.b.data_vec = [float(v) for v in line.replace("fc1.b=", "").split(",") if v]
 
     elif line.startswith("fc2.W="):
-        model.fc2.W.data_mat = [eval(r) for r in line.replace("fc2.W=","").split(";") if r]
+        rows = [eval(r) for r in line.replace("fc2.W=", "").split(";") if r]
+        model.fc2.W.data_mat = rows
 
     elif line.startswith("fc2.b="):
-        model.fc2.b.data_vec = [float(x) for x in line.replace("fc2.b=","").split(",") if x]
+        model.fc2.b.data_vec = [float(v) for v in line.replace("fc2.b=", "").split(",") if v]
 
     elif line.startswith("fc3.W="):
-        model.fc3.W.data_mat = [eval(r) for r in line.replace("fc3.W=","").split(";") if r]
+        rows = [eval(r) for r in line.replace("fc3.W=", "").split(";") if r]
+        model.fc3.W.data_mat = rows
 
     elif line.startswith("fc3.b="):
-        model.fc3.b.data_vec = [float(x) for x in line.replace("fc3.b=","").split(",") if x]
+        model.fc3.b.data_vec = [float(v) for v in line.replace("fc3.b=", "").split(",") if v]
 
 print("Weights loaded successfully.")
 
 
-# --------------------------------------------------
+# =====================================================
 # EVALUATION
-# --------------------------------------------------
-
-loss_fn = CrossEntropyLoss()
+# =====================================================
 
 correct = 0
-total_loss = 0.0
+total = 0
+loss_sum = 0.0
 
-start = time.time()
+t0 = time.time()
 
-for img, label in zip(dataset.images, dataset.labels):
+for i in range(len(dataset)):
+
+    img = dataset._load_image(dataset.image_paths[i])
+    label = dataset.labels[i]
 
     x = Tensor(img)
     logits = model(x)
+    loss = loss_fn(logits, label)
+
+    loss_sum += loss.data
 
     pred = logits.data_vec.index(max(logits.data_vec))
-
     if pred == label:
         correct += 1
 
-    loss = loss_fn(logits, label)
-    total_loss += loss.data
+    total += 1
 
-total = len(dataset)
-accuracy = correct / total
-avg_loss = total_loss / total
 
-print("\nRESULTS")
-print("="*60)
-print(f"Accuracy : {accuracy*100:.2f}%")
-print(f"Loss     : {avg_loss:.4f}")
-print(f"Correct  : {correct}/{total}")
-print(f"Time     : {time.time()-start:.2f}s")
-print("="*60)
+elapsed = time.time() - t0
+
+acc = correct / total
+avg_loss = loss_sum / total
+
+
+# =====================================================
+# RESULTS
+# =====================================================
+
+print("\n" + "=" * 60)
+print("Evaluation Results")
+print("=" * 60)
+print(f"Images evaluated : {total}")
+print(f"Average Loss     : {avg_loss:.4f}")
+print(f"Accuracy         : {acc*100:.2f}%")
+print(f"Correct          : {correct}/{total}")
+print(f"Eval Time        : {elapsed:.2f}s")
+print("=" * 60)
