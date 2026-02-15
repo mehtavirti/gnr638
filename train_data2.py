@@ -26,11 +26,13 @@ def argmax(vec):
 def image_to_3d_list(img):
     """
     Convert a PIL RGB image (already resized to 32x32) into a
-    3-D Python list  [C][H][W]  with values normalised to [-1, 1].
-    Replaces: np.array / np.transpose / arithmetic on arrays.
+    3-D Python list  [C][H][W].
     """
     width, height = img.size          # 32, 32
     pixels = list(img.getdata())      # list of (R, G, B) tuples, row-major
+
+    mean = [0.485, 0.456, 0.406]
+    std  = [0.229, 0.224, 0.225]
 
     # Allocate [3][32][32]
     data = [[[0.0] * width for _ in range(height)] for _ in range(3)]
@@ -40,14 +42,14 @@ def image_to_3d_list(img):
             pixel = pixels[row * width + col]   # (R, G, B)  0-255
             for c in range(3):
                 v = pixel[c] / 255.0            # [0, 1]
-                v = (v - 0.5) / 0.5             # [-1, 1]
+                v = (v - mean[c]) / std[c]      # ImageNet normalisation
                 data[c][row][col] = v
 
     return data
 
 
 def gauss_random(mean, std):
-    """Box-Muller transform for Gaussian random numbers"""
+    """Box-Muller transform for Gaussian random numbers (no numpy)."""
     while True:
         u1 = random.random()
         u2 = random.random()
@@ -93,7 +95,7 @@ def load_samples(root):
 # ============================================================
 
 print("=" * 70)
-print("OPTIMIZED RGB CNN (FAST + BETTER GENERALIZATION)")
+print("OPTIMIZED RGB CNN")
 print("=" * 70)
 
 os.makedirs(SAVE_PATH, exist_ok=True)
@@ -151,58 +153,49 @@ x = flatten(x)
 flat_size = len(x.data_vec)
 print(f"Flatten size: {flat_size}")
 
-# ---- FC layer 1 ----
-fc1 = Linear(flat_size, 96)
-std1 = math.sqrt(2.0 / flat_size)          
+fc1 = Linear(flat_size, 128)
+std1 = math.sqrt(2.0 / flat_size)
 fc1.W.data_mat = [
-    [gauss_random(0.0, std1) for _ in range(96)]
+    [gauss_random(0.0, std1) for _ in range(128)]
     for _ in range(flat_size)
 ]
-fc1.b.data_vec = [0.0] * 96
+fc1.b.data_vec = [0.0] * 128
 
-# ---- FC layer 2 ----
-fc2 = Linear(96, 100)
-std2 = math.sqrt(2.0 / 96)
+fc2 = Linear(128, 100)
+std2 = math.sqrt(2.0 / 128)
 fc2.W.data_mat = [
     [gauss_random(0.0, std2) for _ in range(100)]
-    for _ in range(96)
+    for _ in range(128)
 ]
 fc2.b.data_vec = [0.0] * 100
 
 print("FC layers initialized.")
 
 
-# ============================================================
-# MODEL COMPLEXITY  
-# ============================================================
-
 def count_params_and_macs(in_ch, H, W):
-    """
-    Report trainable parameters, MACs and FLOPs for the fixed architecture.
-    """
     # --- conv1: 3 -> 32 filters, 3x3 ---
-    p_conv1   = 32 * 3 * 3 * 3 + 32          # weights + biases
-    mac_conv1 = 32 * 3 * 3 * 3 * (H-2) * (W-2)   # out_h = 30, out_w = 30
-    H1, W1    = (H-2)//2, (W-2)//2            # after pool1 -> 15x15
+    p_conv1   = 32 * 3 * 3 * 3 + 32
+    mac_conv1 = 32 * 3 * 3 * 3 * (H-2) * (W-2)
+    H1, W1    = (H-2)//2, (W-2)//2
 
     # --- conv2: 32 -> 64 filters, 3x3 ---
     p_conv2   = 64 * 32 * 3 * 3 + 64
-    mac_conv2 = 64 * 32 * 3 * 3 * (H1-2) * (W1-2)  # out_h = 13, out_w = 13
-    H2, W2    = (H1-2)//2, (W1-2)//2          # after pool2 -> 6x6
+    mac_conv2 = 64 * 32 * 3 * 3 * (H1-2) * (W1-2)
+    H2, W2    = (H1-2)//2, (W1-2)//2
 
-    flat      = 64 * H2 * W2                  # 64*6*6 = 2304
+    flat      = 64 * H2 * W2
 
-    # --- fc1: flat -> 96 ---
-    p_fc1     = flat * 96 + 96
-    mac_fc1   = flat * 96
+    # --- fc1: flat -> 128 ---
+    p_fc1     = flat * 128 + 128
+    mac_fc1   = flat * 128
 
-    # --- fc2: 96 -> 100 ---
-    p_fc2     = 96 * 100 + 100
-    mac_fc2   = 96 * 100
+    # --- fc2: 128 -> 100 ---
+    p_fc2     = 128 * 100 + 100
+    mac_fc2   = 128 * 100
 
     total_params = p_conv1 + p_conv2 + p_fc1 + p_fc2
     total_macs   = mac_conv1 + mac_conv2 + mac_fc1 + mac_fc2
-    total_flops  = 2 * total_macs   # 1 MAC = 2 FLOPs
+    total_flops  = 2 * total_macs
 
     print("\n" + "="*50)
     print("MODEL COMPLEXITY")
@@ -277,7 +270,6 @@ for epoch in range(EPOCHS):
 
         loss_sum += loss.data
 
-        # -------- PROGRESS PRINT ----------
         if (i + 1) % PRINT_EVERY == 0:
             elapsed = time.time() - epoch_start
             rate    = (i + 1) / elapsed
@@ -329,7 +321,17 @@ for epoch in range(EPOCHS):
         model_name = f"best_model_E{epoch+1}_VA{100*va:.2f}.pkl"
 
         with open(os.path.join(SAVE_PATH, model_name), 'wb') as f:
-            pickle.dump({}, f)
+            checkpoint = {
+                "conv1_W": conv1.W.data_4d,
+                "conv1_b": conv1.b.data_vec,
+                "conv2_W": conv2.W.data_4d,
+                "conv2_b": conv2.b.data_vec,
+                "fc1_W":   fc1.W.data_mat,
+                "fc1_b":   fc1.b.data_vec,
+                "fc2_W":   fc2.W.data_mat,
+                "fc2_b":   fc2.b.data_vec,
+            }
+            pickle.dump(checkpoint, f)
 
         print(f"    ✓ Saved {model_name}")
 
