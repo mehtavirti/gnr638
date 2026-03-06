@@ -1,0 +1,56 @@
+models:
+  resnet50:
+    timm_name: resnet50
+    pretrained: true
+  densenet121:
+    timm_name: densenet121
+    pretrained: true
+  efficientnet_b0:
+    timm_name: efficientnet_b0
+    pretrained: true
+
+training:
+  seed: 42
+  batch_size: 64
+  num_workers: 4
+  num_classes: 30
+  img_size: 224
+  optimizer: adam
+  lr: 0.001
+  weight_decay: 0.0001
+
+scenarios:
+  linear_probe:
+    epochs: 30
+    freeze_backbone: true
+
+  fine_tuning:
+    epochs: 30
+
+  few_shot:
+    epochs: 20
+    fractions: [1.0, 0.2, 0.05]
+
+  corruption:
+    gaussian_noise_sigmas: [0.05, 0.1, 0.2]
+    motion_blur: true
+    brightness_shift: true
+
+  feature_probing:
+    epochs: 30
+    pca_subset_classes: 30
+    pca_subset_per_class: 30
+
+layer_selection:
+  resnet50:
+    early: "layer1"
+    middle: "layer2"
+    final: "layer4"
+  densenet121:
+    early: "features.denseblock1"
+    middle: "features.denseblock2"
+    final: "features.denseblock4"
+  efficientnet_b0:
+    early: "blocks.1"
+    middle: "blocks.3"
+    final: "blocks.6"
