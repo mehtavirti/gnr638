@@ -64,22 +64,20 @@ def count_parameters(model):
 
 
 def compute_efficiency_metrics(model, input_size=(1, 3, 224, 224), device='cpu'):
-    """
-    Compute and print Parameters, MACs, FLOPs.
-    Called at start of every training/evaluation script.
-    """
-    model.eval().to(device)
+    import copy
+    model_copy = copy.deepcopy(model).to(device)
+    model_copy.eval()
     dummy = torch.randn(input_size).to(device)
 
-    # MACs via thop
-    macs, params = profile(model, inputs=(dummy,), verbose=False)
+    macs, params = profile(model_copy, inputs=(dummy,), verbose=False)
 
-    # FLOPs via fvcore
-    flops_analysis = FlopCountAnalysis(model, dummy)
+    flops_analysis = FlopCountAnalysis(model_copy, dummy)
     flops = flops_analysis.total()
 
+    del model_copy
+    torch.cuda.empty_cache()
+
     print(f"\n{'='*45}")
-    print(f"  Efficiency Metrics")
     print(f"  Parameters : {params/1e6:.2f} M")
     print(f"  MACs       : {macs/1e9:.2f} G")
     print(f"  FLOPs      : {flops/1e9:.2f} G")
@@ -90,7 +88,6 @@ def compute_efficiency_metrics(model, input_size=(1, 3, 224, 224), device='cpu')
         'macs_G':   round(macs   / 1e9, 2),
         'flops_G':  round(flops  / 1e9, 2),
     }
-
 
 def get_layer_names(model_name):
     """
