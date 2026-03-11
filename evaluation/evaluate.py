@@ -6,6 +6,8 @@
 #   cd gnr638
 #   pip install -r requirements.txt
 #   python evaluation/evaluate.py --data /path/to/test_dataset --scenario 1
+#   python evaluation/evaluate.py --data /path/to/test_dataset --scenario 2
+#   python evaluation/evaluate.py --data /path/to/test_dataset --scenario 3
 #   python evaluation/evaluate.py --data /path/to/test_dataset --scenario 5
 #   python evaluation/evaluate.py --data /path/to/test_dataset --scenario all
 # =============================================================================
@@ -29,7 +31,6 @@ def install_if_missing():
 install_if_missing()
 
 import gdown
-import copy
 import torch
 import torch.nn as nn
 import numpy as np
@@ -43,21 +44,66 @@ from torch.utils.data import DataLoader, TensorDataset
 from sklearn.metrics import confusion_matrix
 
 # ── Import shared utilities from repo (available after git clone) ──────────────
-from models.load_models import (load_model, freeze_backbone,
+from models.load_models import (load_model, freeze_backbone, unfreeze_last_block,
                                  compute_efficiency_metrics, count_parameters)
 from utils.dataset_loader import get_dataloaders
 
+# =============================================================================
+# CHECKPOINT GOOGLE DRIVE IDs
+# =============================================================================
 CHECKPOINT_IDS = {
 
-    # ── Scenario 1: full model checkpoints (trained linear probe) ─────────────
+    # ── Scenario 1: linear probe checkpoints ──────────────────────────────────
     'scenario1': {
         'resnet50':        '1KJUSNFUPJ1tYA8Y8EjhmPD_IaG_n836f',
         'densenet121':     '1JeViMCW6qNYAKAbPx6UohK5e85szxBRF',
         'efficientnet_b0': '1jKbcw5Cv9odjJNj0rEFuNirgtlJbpHkT',
-       
     },
 
-    # ── Scenario 5: nn.Linear layer classifiers (one per layer per model) ─────
+    # ── Scenario 2: fine-tuning strategy checkpoints ──────────────────────────
+    # Strategies: linear_probe | last_block | full_finetune | selective20
+    # Filename pattern used during training: {model}_{strategy}.pth
+    'scenario2': {
+        'resnet50': {
+            'linear_probe':  '15SEEmWVw9oC4glp2F-CaPJ8hFuJ9bWaV',  # resnet50_linear_probe.pth
+            'last_block':    '12bqIoJo5rTFs1lNxQT3HfbQ8cE3E6rW4',  # resnet50_last_block.pth
+            'full_finetune': '1w6mFh9X9ZEbGC_FzgN62Qp035q674DsE',  # resnet50_full_finetune.pth
+            'selective20':   '1_iGLB62f0y7DiFacsDYXZVMWtWQHUL8L',  # resnet50_selective20.pth
+        },
+        'densenet121': {
+            'linear_probe':  '1zPc7qTUU_0B7SdAhVf6AINCKPg1dGGD6',
+            'last_block':    '1freLTJIU3qUVEeQtLrcn5dPZxJmOdPH1',
+            'full_finetune': '1wrOCHBWqHMaYDboptixiu0Q0FGaZQIRC',
+            'selective20':   '1Jlx1NwJS_1epD1tm_mkziFAJTSjRZQen',
+        },
+        'efficientnet_b0': {
+            'linear_probe':  '1qCFiqsgVZACFvqv6XJmNNwhK5UPiLatg',
+            'last_block':    '1nPPaJaLpv94O27Fm2MM0A_NWTsTWONdF',
+            'full_finetune': '1w_7d0c8bORGffeb_HbdLu8vbNYfJrrJj',
+            'selective20':   '1n3sbugC6wEZfQvbx-iiDurM1alUxSOOP',
+        },
+    },
+
+    # ── Scenario 3: few-shot checkpoints ──────────────────────────────────────
+    'scenario3': {
+        'resnet50': {
+            1.0:  '1Wu1FRuFsQMc0GFAYac2p3xN4q5NmRpr1',
+            0.2:  '1TnMHZ7QbxzazB-jsPi9uSYNdkdjhEW3b',
+            0.05: '1zi4j9OHXhcIf1SPz1VeFUkzWrb1Asc18',
+        },
+        'densenet121': {
+            1.0:  '1BQ8eti6bgjnaylpxvmR9fFE4IwCeLyg0',
+            0.2:  '1i-J0BtEgw2z0mDrGMZhmLr0GXxdn_yir',
+            0.05: '162GE_zzZWrHD12V7TixuQ7_XkiVIDZ3F',
+        },
+        'efficientnet_b0': {
+            1.0:  '1_DBbz2Cz-UGYg3pTib37VBJPt1QvUb1r',
+            0.2:  '19vrrNr9mp7UMEhclwD1ZrRTfJcBrGAA_',
+            0.05: '1Ew30xZuUukHwo159Oujv-av_BJs1I0iP',
+        },
+    },
+
+    # ── Scenario 5: layer-probe classifiers ───────────────────────────────────
     'scenario5': {
         'resnet50': {
             'early':  '1Vr1Wi_OWGeZaWYok9hwpdzo1k9qRUa4q',
@@ -65,14 +111,14 @@ CHECKPOINT_IDS = {
             'final':  '10ncbEmc0Euz81sUgyK4RGahhMoWduiPu',
         },
         'densenet121': {
-            'early':  'PASTE_FILE_ID_HERE',
-            'middle': 'PASTE_FILE_ID_HERE',
-            'final':  'PASTE_FILE_ID_HERE',
+            'early':  '1JtEe9Y_elbKcYww9N1sT4w3YL2xY4ltw',
+            'middle': '1TisHCQgye-SzWTZnXWOeFfYaravY0PcY',
+            'final':  '1yrFWc7cp-hLO34Xe2SbehKcRXXoYReWh',
         },
         'efficientnet_b0': {
-            'early':  'PASTE_FILE_ID_HERE',
-            'middle': 'PASTE_FILE_ID_HERE',
-            'final':  'PASTE_FILE_ID_HERE',
+            'early':  '168gWzQ1axY1pdQ0RuJzqfR_bQF3o4Lye',
+            'middle': '1nyvlcB0ouLtBXwyk6n3x6y5dojWbB7dS',
+            'final':  '1Xp4IauBArOr5PFBFVH9h_7Lg0kavep_K',
         },
     },
 }
@@ -83,63 +129,64 @@ CHECKPOINT_IDS = {
 NUM_CLASSES = 30
 MODEL_NAMES = ['resnet50', 'densenet121', 'efficientnet_b0']
 DEPTH_ORDER = ['early', 'middle', 'final']
-COLORS      = {'resnet50':        'steelblue',
-               'densenet121':     'tomato',
-               'efficientnet_b0': 'seagreen'}
+FRACTIONS   = [1.0, 0.2, 0.05]
 
-LAYER_SELECTION = {
-    'resnet50': {
-        'early':  'layer1',
-        'middle': 'layer2',
-        'final':  'layer4',
-    },
-    'densenet121': {
-        'early':  'features.denseblock1',
-        'middle': 'features.denseblock2',
-        'final':  'features.denseblock4',
-    },
-    'efficientnet_b0': {
-        'early':  'blocks.1',
-        'middle': 'blocks.3',
-        'final':  'blocks.6',
-    },
+# Scenario 2
+S2_STRATEGIES = ['linear_probe', 'last_block', 'full_finetune', 'selective20']
+
+# Scenario 3
+BEST_STRATEGIES = {
+    'resnet50':        'last_block',
+    'densenet121':     'last_block',
+    'efficientnet_b0': 'full_finetune',
 }
 
-# ── Save checkpoints and results to user's home directory, NOT inside the repo ─
+LAYER_SELECTION = {
+    'resnet50':        {'early': 'layer1',              'middle': 'layer2',              'final': 'layer4'},
+    'densenet121':     {'early': 'features.denseblock1', 'middle': 'features.denseblock2', 'final': 'features.denseblock4'},
+    'efficientnet_b0': {'early': 'blocks.1',             'middle': 'blocks.3',             'final': 'blocks.6'},
+}
+
+COLORS = {
+    'resnet50':        'steelblue',
+    'densenet121':     'tomato',
+    'efficientnet_b0': 'seagreen',
+}
+S2_STRATEGY_COLORS = {
+    'linear_probe':  'steelblue',
+    'last_block':    'tomato',
+    'full_finetune': 'seagreen',
+    'selective20':   'goldenrod',
+}
+
 CKPT_DIR    = os.path.join(os.path.expanduser('~'), 'gnr638_checkpoints')
 RESULTS_DIR = os.path.join(os.path.expanduser('~'), 'gnr638_results', 'evaluation')
-
 for d in [CKPT_DIR, RESULTS_DIR]:
     os.makedirs(d, exist_ok=True)
 
 
 # =============================================================================
-# DOWNLOAD UTILITIES — only .pth files, everything else from repo
+# DOWNLOAD UTILITIES
 # =============================================================================
 
 def download_file(file_id, save_path):
-    """Download one .pth from Google Drive. Skip if already exists."""
     if os.path.exists(save_path):
         size_mb = os.path.getsize(save_path) / (1024 * 1024)
-        print(f" Already exists ({size_mb:.1f} MB): "
-              f"{os.path.basename(save_path)}")
+        print(f"  Already exists ({size_mb:.1f} MB): {os.path.basename(save_path)}")
         return True
-
-    if not file_id or 'PASTE_FILE_ID_HERE' in file_id:
-        print(f" File ID not set: {os.path.basename(save_path)}")
-        print(f" Fill CHECKPOINT_IDS in evaluate.py with real Drive IDs")
+    if not file_id or 'PASTE_FILE_ID_HERE' in str(file_id):
+        print(f"  File ID not set: {os.path.basename(save_path)}")
         return False
-
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     url = f"https://drive.google.com/uc?id={file_id}&confirm=t"
-    print(f" Downloading: {os.path.basename(save_path)} ...")
+    print(f"  Downloading: {os.path.basename(save_path)} ...")
     try:
         gdown.download(url, save_path, quiet=False, fuzzy=True)
         size_mb = os.path.getsize(save_path) / (1024 * 1024)
-        print(f"   Done ({size_mb:.1f} MB)")
+        print(f"    Done ({size_mb:.1f} MB)")
         return True
     except Exception as e:
-        print(f"   Download failed: {e}")
+        print(f"    Download failed: {e}")
         return False
 
 
@@ -155,6 +202,40 @@ def download_scenario1_checkpoints():
     return paths
 
 
+def download_scenario2_checkpoints():
+    print("\n── Downloading Scenario 2 Checkpoints ───────────────")
+    paths   = {}
+    total   = len(MODEL_NAMES) * len(S2_STRATEGIES)
+    success = 0
+    for name in MODEL_NAMES:
+        paths[name] = {}
+        for strategy in S2_STRATEGIES:
+            fid  = CHECKPOINT_IDS['scenario2'][name][strategy]
+            path = os.path.join(CKPT_DIR, 'scenario2', f'{name}_{strategy}.pth')
+            if download_file(fid, path):
+                paths[name][strategy] = path
+                success += 1
+    print(f"  Ready: {success}/{total} checkpoints")
+    return paths
+
+
+def download_scenario3_checkpoints():
+    print("\n── Downloading Scenario 3 Checkpoints ───────────────")
+    paths   = {}
+    total   = len(MODEL_NAMES) * len(FRACTIONS)
+    success = 0
+    for name in MODEL_NAMES:
+        paths[name] = {}
+        for frac in FRACTIONS:
+            fid      = CHECKPOINT_IDS['scenario3'][name][frac]
+            path     = os.path.join(CKPT_DIR, 'scenario3', f'{name}_fewshot_{frac}_best.pth')
+            if download_file(fid, path):
+                paths[name][frac] = path
+                success += 1
+    print(f"  Ready: {success}/{total} checkpoints")
+    return paths
+
+
 def download_scenario5_checkpoints():
     print("\n── Downloading Scenario 5 Checkpoints ───────────────")
     paths   = {}
@@ -164,8 +245,7 @@ def download_scenario5_checkpoints():
         paths[name] = {}
         for depth in DEPTH_ORDER:
             fid  = CHECKPOINT_IDS['scenario5'][name][depth]
-            path = os.path.join(CKPT_DIR, 'scenario5',
-                                f'{name}_{depth}_probe_best.pth')
+            path = os.path.join(CKPT_DIR, 'scenario5', f'{name}_{depth}_probe_best.pth')
             if download_file(fid, path):
                 paths[name][depth] = path
                 success += 1
@@ -174,27 +254,72 @@ def download_scenario5_checkpoints():
 
 
 # =============================================================================
-# MODEL UTILITIES — uses shared models/load_models.py from repo
+# MODEL LOAD HELPERS
 # =============================================================================
 
-def load_checkpoint(model_name, ckpt_path, device):
-    """Load model using shared load_model(), strip thop keys."""
-    model = load_model(model_name, num_classes=NUM_CLASSES, pretrained=False)
-    ckpt  = torch.load(ckpt_path, map_location=device)
+def _load_state(ckpt_path, device):
+    ckpt  = torch.load(ckpt_path, map_location=device, weights_only=False)
     state = ckpt.get('state_dict', ckpt)
-    clean = {k: v for k, v in state.items()
-             if not k.endswith(('total_ops', 'total_params'))}
-    model.load_state_dict(clean, strict=False)
+    return {k: v for k, v in state.items()
+            if not k.endswith(('total_ops', 'total_params'))}
+
+
+def load_checkpoint(model_name, ckpt_path, device):
+    """Scenario 1 / plain load."""
+    model = load_model(model_name, num_classes=NUM_CLASSES, pretrained=False)
+    model.load_state_dict(_load_state(ckpt_path, device), strict=False)
+    return model
+
+
+def load_checkpoint_s2(model_name, ckpt_path, strategy, device):
+    """Scenario 2 — reproduce the freeze/unfreeze used at training time."""
+    model = load_model(model_name, num_classes=NUM_CLASSES, pretrained=False)
+    if strategy == 'linear_probe':
+        model = freeze_backbone(model)
+    elif strategy == 'last_block':
+        model = freeze_backbone(model)
+        model = unfreeze_last_block(model, model_name)
+    elif strategy == 'full_finetune':
+        for p in model.parameters():
+            p.requires_grad = True
+    elif strategy == 'selective20':
+        model = _selective_unfreeze(model, target_ratio=0.20)
+    model.load_state_dict(_load_state(ckpt_path, device), strict=False)
+    return model
+
+
+def load_checkpoint_s3(model_name, ckpt_path, strategy, device):
+    """Scenario 3 — reproduce the freeze/unfreeze used at training time."""
+    model = load_model(model_name, num_classes=NUM_CLASSES, pretrained=False)
+    if strategy == 'last_block':
+        model = freeze_backbone(model)
+        model = unfreeze_last_block(model, model_name)
+    elif strategy == 'full_finetune':
+        for p in model.parameters():
+            p.requires_grad = True
+    model.load_state_dict(_load_state(ckpt_path, device), strict=False)
+    return model
+
+
+def _selective_unfreeze(model, target_ratio=0.20):
+    """Unfreeze deepest layers until ~target_ratio of params are trainable."""
+    total = sum(p.numel() for p in model.parameters())
+    for p in model.parameters():
+        p.requires_grad = False
+    trainable = 0
+    for _, param in reversed(list(model.named_parameters())):
+        param.requires_grad = True
+        trainable += param.numel()
+        if trainable / total >= target_ratio:
+            break
     return model
 
 
 def print_efficiency_info(model_name, device):
-    """Print params/MACs/FLOPs using shared compute_efficiency_metrics."""
     print(f"\n    [Efficiency — {model_name}]")
-    model  = load_model(model_name, num_classes=NUM_CLASSES, pretrained=False)
-    model  = freeze_backbone(model)
-    metrics = compute_efficiency_metrics(
-        model, input_size=(1, 3, 224, 224), device='cpu')
+    model   = load_model(model_name, num_classes=NUM_CLASSES, pretrained=False)
+    model   = freeze_backbone(model)
+    metrics = compute_efficiency_metrics(model, input_size=(1, 3, 224, 224), device='cpu')
     total_p, trainable_p = count_parameters(model)
     print(f"    Total params     : {total_p/1e6:.2f} M")
     print(f"    Trainable params : {trainable_p/1e6:.4f} M")
@@ -207,7 +332,6 @@ def print_efficiency_info(model_name, device):
 # =============================================================================
 
 def get_test_dataloader(data_dir, batch_size=64):
-    """Clean test transform — no augmentation."""
     transform = transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.ToTensor(),
@@ -215,10 +339,10 @@ def get_test_dataloader(data_dir, batch_size=64):
                              std=[0.229, 0.224, 0.225]),
     ])
     dataset = datasets.ImageFolder(root=data_dir, transform=transform)
+    pin     = torch.cuda.is_available()
     loader  = DataLoader(dataset, batch_size=batch_size,
-                         shuffle=False, num_workers=2, pin_memory=True)
-    print(f"\n  Dataset : {len(dataset)} samples | "
-          f"{len(dataset.classes)} classes")
+                         shuffle=False, num_workers=0, pin_memory=pin)
+    print(f"\n  Dataset : {len(dataset)} samples | {len(dataset.classes)} classes")
     print(f"  Path    : {data_dir}")
     return loader, dataset.classes
 
@@ -240,19 +364,26 @@ def run_inference(model, loader, device):
 
 
 def per_class_accuracy(all_labels, all_preds, classes):
-    cm          = confusion_matrix(all_labels, all_preds)
-    per_cls_acc = cm.diagonal() / cm.sum(axis=1)
-    return pd.DataFrame({
-        'Class':    classes,
-        'Accuracy': np.round(per_cls_acc, 4)
-    }).sort_values('Accuracy', ascending=True)
+    """Safe per-class accuracy: handles missing classes and zero-row division."""
+    present_labels = sorted(set(int(l) for l in all_labels))
+    cm             = confusion_matrix(all_labels, all_preds, labels=present_labels)
+    row_sums       = cm.sum(axis=1)
+    per_cls_acc    = np.where(row_sums > 0,
+                              cm.diagonal() / np.maximum(row_sums, 1), 0.0)
+    present_names  = [classes[i] for i in present_labels]
+    return pd.DataFrame({'Class': present_names,
+                         'Accuracy': np.round(per_cls_acc, 4)
+                         }).sort_values('Accuracy', ascending=True)
 
 
 def save_confusion_matrix(all_labels, all_preds, classes, title, save_path):
-    cm = confusion_matrix(all_labels, all_preds)
-    fig, ax = plt.subplots(figsize=(18, 15))
+    present_labels = sorted(set(int(l) for l in all_labels))
+    present_names  = [classes[i] for i in present_labels]
+    cm  = confusion_matrix(all_labels, all_preds, labels=present_labels)
+    fig, ax = plt.subplots(figsize=(max(10, len(present_names) * 0.6),
+                                    max(8,  len(present_names) * 0.5)))
     sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
-                xticklabels=classes, yticklabels=classes,
+                xticklabels=present_names, yticklabels=present_names,
                 ax=ax, annot_kws={'size': 7})
     ax.set_xlabel('Predicted', fontsize=12)
     ax.set_ylabel('True',      fontsize=12)
@@ -262,7 +393,7 @@ def save_confusion_matrix(all_labels, all_preds, classes, title, save_path):
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
     plt.close()
-    print(f"    ✓ Confusion matrix → {save_path}")
+    print(f"    Confusion matrix {save_path}")
 
 
 # =============================================================================
@@ -276,7 +407,7 @@ def evaluate_scenario1(data_dir, batch_size, device):
 
     ckpt_paths = download_scenario1_checkpoints()
     if not ckpt_paths:
-        print(" No checkpoints available. Aborting Scenario 1.")
+        print("  No checkpoints available. Aborting Scenario 1.")
         return None
 
     loader, classes = get_test_dataloader(data_dir, batch_size)
@@ -284,33 +415,27 @@ def evaluate_scenario1(data_dir, batch_size, device):
 
     for model_name in MODEL_NAMES:
         if model_name not in ckpt_paths:
-            print(f"\n Skipping {model_name} — checkpoint missing")
+            print(f"\n  Skipping {model_name} — checkpoint missing")
             continue
 
         print(f"\n{'─'*55}")
         print(f"  Model: {model_name}")
         print(f"{'─'*55}")
 
-        # Efficiency (uses shared util)
-        eff = print_efficiency_info(model_name, device)
-
-        # Load trained model
+        eff   = print_efficiency_info(model_name, device)
         model = load_checkpoint(model_name, ckpt_paths[model_name], device)
         model = model.to(device)
 
-        # Inference
         acc, preds, labels = run_inference(model, loader, device)
         print(f"\n    Overall Accuracy : {acc:.4f}  ({acc*100:.2f}%)")
 
-        # Per-class accuracy
         df_cls   = per_class_accuracy(labels, preds, classes)
         csv_path = os.path.join(RESULTS_DIR, f's1_{model_name}_per_class.csv')
         df_cls.to_csv(csv_path, index=False)
         print(f"\n    Bottom 5 failure classes:")
         print(df_cls.head(5).to_string(index=False))
-        print(f"    Per-class CSV → {csv_path}")
+        print(f"    Per-class CSV {csv_path}")
 
-        # Confusion matrix
         save_confusion_matrix(
             labels, preds, classes,
             f'Scenario 1 — {model_name}  (Acc: {acc:.4f})',
@@ -323,17 +448,272 @@ def evaluate_scenario1(data_dir, batch_size, device):
             'MACs (G)':   eff.get('macs_G',   ''),
             'FLOPs (G)':  eff.get('flops_G',  ''),
         })
+        del model; torch.cuda.empty_cache()
 
-        del model
-        torch.cuda.empty_cache()
-
-    # Summary
     df_summary = pd.DataFrame(summary_records)
     csv_path   = os.path.join(RESULTS_DIR, 's1_summary.csv')
     df_summary.to_csv(csv_path, index=False)
     print(f"\n── Scenario 1 Summary ────────────────────────────────")
     print(df_summary.to_string(index=False))
-    print(f"Summary → {csv_path}")
+    print(f"  Summary {csv_path}")
+    return df_summary
+
+
+# =============================================================================
+# SCENARIO 2 EVALUATION
+# =============================================================================
+
+def evaluate_scenario2(data_dir, batch_size, device):
+    print(f"\n{'='*60}")
+    print(f"  SCENARIO 2 — Fine-Tuning Strategies Evaluation")
+    print(f"{'='*60}")
+
+    ckpt_paths = download_scenario2_checkpoints()
+    if not ckpt_paths:
+        print("  No checkpoints available. Aborting Scenario 2.")
+        return None
+
+    loader, classes = get_test_dataloader(data_dir, batch_size)
+    summary_records = []
+
+    for model_name in MODEL_NAMES:
+        print(f"\n{'─'*55}")
+        print(f"  Model: {model_name}")
+        print(f"{'─'*55}")
+
+        eff = print_efficiency_info(model_name, device)
+
+        for strategy in S2_STRATEGIES:
+            if strategy not in ckpt_paths.get(model_name, {}):
+                print(f"\n  Skipping {strategy} — checkpoint missing")
+                continue
+
+            print(f"\n    ── Strategy: {strategy}")
+
+            model = load_checkpoint_s2(
+                model_name, ckpt_paths[model_name][strategy], strategy, device)
+            model = model.to(device)
+
+            # Report trainable % for this strategy
+            total_p, trainable_p = count_parameters(model)
+            pct = trainable_p / total_p * 100 if total_p > 0 else 0.0
+            print(f"      Trainable params : {trainable_p/1e6:.4f} M  ({pct:.2f}%)")
+
+            acc, preds, labels = run_inference(model, loader, device)
+            print(f"      Test Accuracy    : {acc:.4f}  ({acc*100:.2f}%)")
+
+            # Per-class CSV
+            df_cls   = per_class_accuracy(labels, preds, classes)
+            csv_path = os.path.join(RESULTS_DIR,
+                                    f's2_{model_name}_{strategy}_per_class.csv')
+            df_cls.to_csv(csv_path, index=False)
+            print(f"      Bottom-5 failure classes:")
+            print(df_cls.head(5).to_string(index=False))
+            print(f"      Per-class CSV {csv_path}")
+
+            summary_records.append({
+                'Model':            model_name,
+                'Strategy':         strategy,
+                'Accuracy':         round(acc, 4),
+                'Trainable (M)':    round(trainable_p / 1e6, 4),
+                'Pct Unfrozen':     round(pct, 2),
+                'Params (M)':       eff.get('params_M', ''),
+                'MACs (G)':         eff.get('macs_G',   ''),
+                'FLOPs (G)':        eff.get('flops_G',  ''),
+            })
+
+            del model; torch.cuda.empty_cache()
+
+    df_summary = pd.DataFrame(summary_records)
+    csv_path   = os.path.join(RESULTS_DIR, 's2_summary.csv')
+    df_summary.to_csv(csv_path, index=False)
+    print(f"\n── Scenario 2 Summary ────────────────────────────────")
+    print(df_summary.to_string(index=False))
+    print(f"  Summary {csv_path}")
+
+    if df_summary.empty:
+        return df_summary
+
+    # ── Plot 1: Accuracy vs % Params Unfrozen (line per model) ────────────────
+    fig, ax = plt.subplots(figsize=(8, 6))
+    for name in MODEL_NAMES:
+        sub = df_summary[df_summary['Model'] == name].sort_values('Pct Unfrozen')
+        if sub.empty:
+            continue
+        ax.plot(sub['Pct Unfrozen'], sub['Accuracy'],
+                marker='o', label=name, color=COLORS[name], linewidth=2)
+    ax.set_xlabel('% Parameters Unfrozen')
+    ax.set_ylabel('Test Accuracy')
+    ax.set_title('Scenario 2: Fine-Tuning Performance vs Parameters Unfrozen')
+    ax.legend(); ax.grid(True, alpha=0.4)
+    plt.tight_layout()
+    p = os.path.join(RESULTS_DIR, 's2_acc_vs_pct_unfrozen.png')
+    plt.savefig(p, dpi=150, bbox_inches='tight'); plt.close()
+    print(f"  Acc vs % unfrozen {p}")
+
+    # ── Plot 2: Grouped bar — strategy vs accuracy per model ──────────────────
+    fig, ax = plt.subplots(figsize=(10, 6))
+    sns.barplot(data=df_summary, x='Strategy', y='Accuracy', hue='Model',
+                palette=list(COLORS.values()), ax=ax)
+    ax.set_title('Scenario 2: Validation Accuracy Across Fine-Tuning Strategies')
+    ax.set_ylabel('Test Accuracy')
+    ax.set_xlabel('Fine-Tuning Strategy')
+    ax.legend()
+    plt.tight_layout()
+    p = os.path.join(RESULTS_DIR, 's2_strategy_bar.png')
+    plt.savefig(p, dpi=150, bbox_inches='tight'); plt.close()
+    print(f"  Strategy bar chart {p}")
+
+    # ── Plot 3: Parameter efficiency (accuracy / pct_unfrozen) ────────────────
+    df_summary['AccPerParam'] = df_summary.apply(
+        lambda r: r['Accuracy'] / r['Pct Unfrozen'] if r['Pct Unfrozen'] > 0 else 0, axis=1)
+    fig, ax = plt.subplots(figsize=(8, 6))
+    for name in MODEL_NAMES:
+        sub = df_summary[df_summary['Model'] == name].sort_values('Pct Unfrozen')
+        if sub.empty:
+            continue
+        ax.plot(sub['Pct Unfrozen'], sub['AccPerParam'],
+                marker='o', label=name, color=COLORS[name], linewidth=2)
+    ax.set_xlabel('% Parameters Unfrozen')
+    ax.set_ylabel('Accuracy / % Unfrozen')
+    ax.set_title('Scenario 2: Parameter Efficiency')
+    ax.legend(); ax.grid(True, alpha=0.4)
+    plt.tight_layout()
+    p = os.path.join(RESULTS_DIR, 's2_param_efficiency.png')
+    plt.savefig(p, dpi=150, bbox_inches='tight'); plt.close()
+    print(f"  Param efficiency plot {p}")
+
+    return df_summary
+
+
+# =============================================================================
+# SCENARIO 3 EVALUATION
+# =============================================================================
+
+def evaluate_scenario3(data_dir, batch_size, device):
+    print(f"\n{'='*60}")
+    print(f"  SCENARIO 3 — Few-Shot Learning Analysis Evaluation")
+    print(f"{'='*60}")
+
+    ckpt_paths = download_scenario3_checkpoints()
+    if not ckpt_paths:
+        print("  No checkpoints available. Aborting Scenario 3.")
+        return None
+
+    loader, classes = get_test_dataloader(data_dir, batch_size)
+    summary_records = []
+    metrics_records = []
+
+    for model_name in MODEL_NAMES:
+        print(f"\n{'─'*55}")
+        print(f"  Model : {model_name}  |  strategy : {BEST_STRATEGIES[model_name]}")
+        print(f"{'─'*55}")
+
+        eff          = print_efficiency_info(model_name, device)
+        acc_per_frac = {}
+
+        for frac in FRACTIONS:
+            if frac not in ckpt_paths.get(model_name, {}):
+                print(f"\n  Skipping fraction {frac} — checkpoint missing")
+                continue
+
+            print(f"\n    ── Fraction : {frac}  ({int(frac*100)}% of training data)")
+            model = load_checkpoint_s3(
+                model_name, ckpt_paths[model_name][frac],
+                BEST_STRATEGIES[model_name], device)
+            model = model.to(device)
+
+            acc, preds, labels = run_inference(model, loader, device)
+            print(f"      Test Accuracy : {acc:.4f}  ({acc*100:.2f}%)")
+            acc_per_frac[frac] = acc
+
+            df_cls   = per_class_accuracy(labels, preds, classes)
+            csv_path = os.path.join(RESULTS_DIR,
+                                    f's3_{model_name}_frac{frac}_per_class.csv')
+            df_cls.to_csv(csv_path, index=False)
+            print(f"      Bottom-5 failure classes:")
+            print(df_cls.head(5).to_string(index=False))
+            print(f"      Per-class CSV {csv_path}")
+
+            summary_records.append({
+                'Model':      model_name,
+                'Fraction':   frac,
+                'Accuracy':   round(acc, 4),
+                'Params (M)': eff.get('params_M', ''),
+                'MACs (G)':   eff.get('macs_G',   ''),
+                'FLOPs (G)':  eff.get('flops_G',  ''),
+            })
+            del model; torch.cuda.empty_cache()
+
+        if len(acc_per_frac) == 3:
+            acc100 = acc_per_frac[1.0]
+            acc5   = acc_per_frac[0.05]
+            drop   = (acc100 - acc5) / acc100 if acc100 > 0 else 0.0
+            metrics_records.append({
+                'model':         model_name,
+                'acc_100pct':    round(acc100, 4),
+                'acc_20pct':     round(acc_per_frac[0.2], 4),
+                'acc_5pct':      round(acc5, 4),
+                'relative_drop': round(drop, 4),
+            })
+
+    df_summary = pd.DataFrame(summary_records)
+    df_summary.to_csv(os.path.join(RESULTS_DIR, 's3_summary.csv'), index=False)
+    print(f"\n── Scenario 3 Summary ────────────────────────────────")
+    print(df_summary.to_string(index=False))
+
+    metrics_df = pd.DataFrame(metrics_records)
+    if not metrics_df.empty:
+        metrics_df.to_csv(os.path.join(RESULTS_DIR, 's3_metrics.csv'), index=False)
+        print(metrics_df.to_string(index=False))
+
+    if not df_summary.empty:
+        fig, ax = plt.subplots(figsize=(8, 6))
+        for name in MODEL_NAMES:
+            sub = df_summary[df_summary['Model'] == name].sort_values('Fraction')
+            if sub.empty: continue
+            ax.plot(sub['Fraction'], sub['Accuracy'],
+                    marker='o', label=name, color=COLORS[name], linewidth=2)
+        ax.set_xlabel('Dataset Fraction'); ax.set_ylabel('Test Accuracy')
+        ax.set_title('Scenario 3: Few-Shot — Test Accuracy vs Data Fraction')
+        ax.legend(); ax.grid(True, alpha=0.4); ax.set_ylim(0, 1)
+        plt.tight_layout()
+        p = os.path.join(RESULTS_DIR, 's3_val_acc_vs_fraction.png')
+        plt.savefig(p, dpi=150, bbox_inches='tight'); plt.close()
+        print(f"  Val acc vs fraction {p}")
+
+        x, width = np.arange(len(MODEL_NAMES)), 0.25
+        fig, ax  = plt.subplots(figsize=(9, 5))
+        for i, frac in enumerate(FRACTIONS):
+            vals = []
+            for name in MODEL_NAMES:
+                row = df_summary[(df_summary['Model'] == name) & (df_summary['Fraction'] == frac)]
+                vals.append(float(row['Accuracy'].values[0]) if not row.empty else 0.0)
+            ax.bar(x + (i - 1) * width, vals, width, label=f'{int(frac*100)}%')
+        ax.set_xticks(x); ax.set_xticklabels(MODEL_NAMES, rotation=15)
+        ax.set_ylabel('Test Accuracy')
+        ax.set_title('Scenario 3: Accuracy Across Data Fractions')
+        ax.legend(); ax.grid(axis='y', alpha=0.4)
+        plt.tight_layout()
+        p = os.path.join(RESULTS_DIR, 's3_acc_comparison.png')
+        plt.savefig(p, dpi=150, bbox_inches='tight'); plt.close()
+        print(f"  Accuracy bar chart {p}")
+
+    if not metrics_df.empty:
+        fig, ax    = plt.subplots(figsize=(7, 4))
+        bar_colors = [COLORS[m] for m in metrics_df['model']]
+        bars       = ax.bar(metrics_df['model'], metrics_df['relative_drop'], color=bar_colors)
+        ax.set_ylabel('Relative Drop  ∆ = (Acc100 − Acc5) / Acc100')
+        ax.set_title('Scenario 3: Relative Performance Drop (100% → 5% data)')
+        ax.set_ylim(0, 1); ax.grid(axis='y', alpha=0.4)
+        for bar, val in zip(bars, metrics_df['relative_drop']):
+            ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
+                    f'{val:.3f}', ha='center', va='bottom', fontsize=11)
+        plt.tight_layout()
+        p = os.path.join(RESULTS_DIR, 's3_relative_drop.png')
+        plt.savefig(p, dpi=150, bbox_inches='tight'); plt.close()
+        print(f" Relative drop plot {p}")
+
     return df_summary
 
 
@@ -342,38 +722,31 @@ def evaluate_scenario1(data_dir, batch_size, device):
 # =============================================================================
 
 def extract_layer_features(backbone, loader, layer_name, device):
-    """Extract GAP features from named intermediate layer via hook."""
     named_mods = dict(backbone.named_modules())
     module     = named_mods.get(layer_name)
     if module is None:
         for n, m in named_mods.items():
             if n.startswith(layer_name):
-                module = m
-                break
+                module = m; break
     if module is None:
         raise ValueError(f"Layer '{layer_name}' not found in model.")
 
     captured = []
     def hook_fn(m, inp, out):
         feat = out.detach().cpu()
-        if feat.dim() == 4:
-            feat = feat.mean(dim=[2, 3])
-        elif feat.dim() == 3:
-            feat = feat.mean(dim=1)
+        if feat.dim() == 4:   feat = feat.mean(dim=[2, 3])
+        elif feat.dim() == 3: feat = feat.mean(dim=1)
         captured.append(feat)
 
     hook        = module.register_forward_hook(hook_fn)
-    feats_list  = []
-    labels_list = []
-
+    feats_list, labels_list = [], []
     backbone.eval()
     with torch.no_grad():
         for imgs, labels in loader:
             captured.clear()
-            _  = backbone(imgs.to(device))
+            _ = backbone(imgs.to(device))
             feats_list.append(captured[0])
             labels_list.extend(labels.numpy())
-
     hook.remove()
     feats = torch.cat(feats_list, dim=0)
     print(f"      Feature shape: {feats.shape}")
@@ -387,7 +760,7 @@ def evaluate_scenario5(data_dir, batch_size, device):
 
     ckpt_paths = download_scenario5_checkpoints()
     if not ckpt_paths:
-        print(" No checkpoints available. Aborting Scenario 5.")
+        print("  No checkpoints available. Aborting Scenario 5.")
         return None
 
     loader, classes = get_test_dataloader(data_dir, batch_size)
@@ -398,10 +771,7 @@ def evaluate_scenario5(data_dir, batch_size, device):
         print(f"  Model: {model_name}")
         print(f"{'─'*55}")
 
-        # Efficiency
-        eff = print_efficiency_info(model_name, device)
-
-        # Frozen pretrained backbone — same setup as training
+        eff      = print_efficiency_info(model_name, device)
         backbone = load_model(model_name, num_classes=NUM_CLASSES, pretrained=True)
         backbone = freeze_backbone(backbone)
         backbone = backbone.to(device)
@@ -409,38 +779,29 @@ def evaluate_scenario5(data_dir, batch_size, device):
 
         for depth in DEPTH_ORDER:
             if depth not in ckpt_paths.get(model_name, {}):
-                print(f"\n  Skipping {depth} — checkpoint missing")
-                continue
+                print(f"\n  Skipping {depth} — checkpoint missing"); continue
 
             layer_name = LAYER_SELECTION[model_name][depth]
             ckpt_path  = ckpt_paths[model_name][depth]
-
             print(f"\n    ── Layer: {depth} ({layer_name})")
 
-            # Extract features using frozen backbone
-            feats, labels = extract_layer_features(
-                backbone, loader, layer_name, device)
+            feats, labels = extract_layer_features(backbone, loader, layer_name, device)
 
-            # Load saved nn.Linear classifier
             in_dim = feats.shape[1]
             clf    = nn.Linear(in_dim, NUM_CLASSES).to(device)
-            ckpt   = torch.load(ckpt_path, map_location=device)
-            state  = ckpt.get('state_dict', ckpt)
-            clf.load_state_dict(state)
+            clf.load_state_dict(_load_state(ckpt_path, device))
             clf.eval()
 
-            # Evaluate
+            pin         = torch.cuda.is_available()
             feat_loader = DataLoader(
-                TensorDataset(feats, torch.tensor(labels)),
-                batch_size=batch_size, shuffle=False)
+                TensorDataset(feats, torch.tensor(labels, dtype=torch.long)),
+                batch_size=batch_size, shuffle=False, pin_memory=pin)
 
-            correct, total = 0, 0
-            all_preds = []
+            correct, total, all_preds = 0, 0, []
             with torch.no_grad():
                 for xb, yb in feat_loader:
                     xb, yb  = xb.to(device), yb.to(device)
-                    out     = clf(xb)
-                    _, pred = torch.max(out, 1)
+                    _, pred = torch.max(clf(xb), 1)
                     correct += (pred == yb).sum().item()
                     total   += yb.size(0)
                     all_preds.extend(pred.cpu().numpy())
@@ -448,12 +809,10 @@ def evaluate_scenario5(data_dir, batch_size, device):
             acc = correct / total
             print(f"      Accuracy : {acc:.4f}  ({acc*100:.2f}%)")
 
-            # Per-class CSV
             df_cls   = per_class_accuracy(labels, all_preds, classes)
-            csv_path = os.path.join(RESULTS_DIR,
-                                    f's5_{model_name}_{depth}_per_class.csv')
+            csv_path = os.path.join(RESULTS_DIR, f's5_{model_name}_{depth}_per_class.csv')
             df_cls.to_csv(csv_path, index=False)
-            print(f"      ✓ Per-class CSV → {csv_path}")
+            print(f"      Per-class CSV {csv_path}")
 
             summary_records.append({
                 'Model':       model_name,
@@ -465,46 +824,37 @@ def evaluate_scenario5(data_dir, batch_size, device):
                 'MACs (G)':    eff.get('macs_G',   ''),
                 'FLOPs (G)':   eff.get('flops_G',  ''),
             })
+            del clf; torch.cuda.empty_cache()
 
-            del clf
-            torch.cuda.empty_cache()
+        del backbone; torch.cuda.empty_cache()
 
-        del backbone
-        torch.cuda.empty_cache()
-
-    # Summary table
     df_summary = pd.DataFrame(summary_records)
     csv_path   = os.path.join(RESULTS_DIR, 's5_summary.csv')
     df_summary.to_csv(csv_path, index=False)
 
-    # Accuracy vs depth plot
-    fig, ax = plt.subplots(figsize=(10, 5))
-    for name in MODEL_NAMES:
-        sub = df_summary[df_summary['Model'] == name]
-        if sub.empty:
-            continue
-        vals, depths_found = [], []
-        for d in DEPTH_ORDER:
-            row = sub[sub['Layer'] == d]
-            if not row.empty:
-                vals.append(row['Accuracy'].values[0])
-                depths_found.append(d)
-        ax.plot(depths_found, vals, marker='o',
-                label=name, color=COLORS[name], linewidth=2)
-
-    ax.set_title('Scenario 5 — Accuracy vs Layer Depth', fontsize=13)
-    ax.set_xlabel('Layer Depth')
-    ax.set_ylabel('Accuracy')
-    ax.legend(); ax.grid(True, alpha=0.4); ax.set_ylim(0, 1)
-    plt.tight_layout()
-    plot_path = os.path.join(RESULTS_DIR, 's5_accuracy_vs_depth.png')
-    plt.savefig(plot_path, dpi=150, bbox_inches='tight')
-    plt.close()
-    print(f"\n Accuracy vs depth plot → {plot_path}")
+    if not df_summary.empty:
+        fig, ax = plt.subplots(figsize=(10, 5))
+        for name in MODEL_NAMES:
+            sub = df_summary[df_summary['Model'] == name]
+            if sub.empty: continue
+            vals, depths_found = [], []
+            for d in DEPTH_ORDER:
+                row = sub[sub['Layer'] == d]
+                if not row.empty:
+                    vals.append(row['Accuracy'].values[0]); depths_found.append(d)
+            ax.plot(depths_found, vals, marker='o', label=name,
+                    color=COLORS[name], linewidth=2)
+        ax.set_title('Scenario 5 — Accuracy vs Layer Depth', fontsize=13)
+        ax.set_xlabel('Layer Depth'); ax.set_ylabel('Accuracy')
+        ax.legend(); ax.grid(True, alpha=0.4); ax.set_ylim(0, 1)
+        plt.tight_layout()
+        plot_path = os.path.join(RESULTS_DIR, 's5_accuracy_vs_depth.png')
+        plt.savefig(plot_path, dpi=150, bbox_inches='tight'); plt.close()
+        print(f"\n  Accuracy vs depth plot  {plot_path}")
 
     print(f"\n── Scenario 5 Summary ────────────────────────────────")
     print(df_summary.to_string(index=False))
-    print(f" Summary {csv_path}")
+    print(f"  Summary {csv_path}")
     return df_summary
 
 
@@ -520,57 +870,55 @@ def main():
 Examples:
   python evaluation/evaluate.py --data /path/to/test_dataset
   python evaluation/evaluate.py --data /path/to/test_dataset --scenario 1
+  python evaluation/evaluate.py --data /path/to/test_dataset --scenario 2
+  python evaluation/evaluate.py --data /path/to/test_dataset --scenario 3
   python evaluation/evaluate.py --data /path/to/test_dataset --scenario 5
         """)
 
-    parser.add_argument('--data',       required=True,
+    parser.add_argument('--data',        required=True,
                         help='Path to test dataset (ImageFolder format)')
-    parser.add_argument('--scenario',   default='all',
-                        choices=['1', '5', 'all'],
-                        help='Scenario to evaluate: 1, 5, or all (default: all)')
-    parser.add_argument('--batch_size', type=int, default=64,
-                        help='Batch size for inference (default: 64)')
-    parser.add_argument('--ckpt_dir',   default=None,
-                        help='Override checkpoint directory '
-                             '(default: ~/gnr638_checkpoints)')
-    parser.add_argument('--results_dir', default=None,
-                        help='Override results directory '
-                             '(default: ~/gnr638_results/evaluation)')
+    parser.add_argument('--scenario',    default='all',
+                        choices=['1', '2', '3', '5', 'all'],
+                        help='Scenario to evaluate (default: all)')
+    parser.add_argument('--batch_size',  type=int, default=64)
+    parser.add_argument('--ckpt_dir',    default=None)
+    parser.add_argument('--results_dir', default=None)
     args = parser.parse_args()
 
-    # Allow CLI overrides for paths
     global CKPT_DIR, RESULTS_DIR
-    if args.ckpt_dir:
-        CKPT_DIR = os.path.abspath(args.ckpt_dir)
-    if args.results_dir:
-        RESULTS_DIR = os.path.abspath(args.results_dir)
+    if args.ckpt_dir:    CKPT_DIR    = os.path.abspath(args.ckpt_dir)
+    if args.results_dir: RESULTS_DIR = os.path.abspath(args.results_dir)
     for d in [CKPT_DIR, RESULTS_DIR]:
         os.makedirs(d, exist_ok=True)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     print(f"\n{'='*60}")
-    print(f"Evaluation")
+    print(f"  GNR638 A2 — Evaluation")
     print(f"{'='*60}")
     print(f"  Dataset      : {args.data}")
     print(f"  Scenario     : {args.scenario}")
     print(f"  Batch size   : {args.batch_size}")
     print(f"  Device       : {device}")
-    print(f"  Checkpoints → : {CKPT_DIR}")
-    print(f"  Results    → : {RESULTS_DIR}")
+    print(f"  Checkpoints : {CKPT_DIR}")
+    print(f"  Results    : {RESULTS_DIR}")
     print(f"{'='*60}")
 
     if not os.path.isdir(args.data):
-        print(f"\n  Dataset path not found: {args.data}")
-        sys.exit(1)
+        print(f"\n  Dataset path not found: {args.data}"); sys.exit(1)
 
     if args.scenario in ('1', 'all'):
         evaluate_scenario1(args.data, args.batch_size, device)
 
+    if args.scenario in ('2', 'all'):
+        evaluate_scenario2(args.data, args.batch_size, device)
+
+    if args.scenario in ('3', 'all'):
+        evaluate_scenario3(args.data, args.batch_size, device)
+
     if args.scenario in ('5', 'all'):
         evaluate_scenario5(args.data, args.batch_size, device)
 
-    # Print all saved output files
     print(f"\n── All output files ──────────────────────────────────")
     for f in sorted(os.listdir(RESULTS_DIR)):
         size = os.path.getsize(os.path.join(RESULTS_DIR, f))
