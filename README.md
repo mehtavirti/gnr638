@@ -1,3 +1,5 @@
+
+# GNR638 Assignment2 – its in assignment2 branch and Readme of that contains how to evaluate that
 # GNR638 Assignment – Model Evaluation Guide
 
 This repository contains the codebase for building the C++ backend and evaluating two models on a given dataset.
