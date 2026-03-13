@@ -93,8 +93,8 @@ CHECKPOINT_IDS = {
     'scenario5': {
         'resnet50': {
             'early':  '1Vr1Wi_OWGeZaWYok9hwpdzo1k9qRUa4q',
-            'middle': '1_4ECM3xskoyk4iz3jKymZeBSXUR8Yarl',
-            'final':  '10ncbEmc0Euz81sUgyK4RGahhMoWduiPu',
+            'middle': '10ncbEmc0Euz81sUgyK4RGahhMoWduiPu',
+            'final':  '1_4ECM3xskoyk4iz3jKymZeBSXUR8Yarl',
         },
         'densenet121': {
             'early':  '1JtEe9Y_elbKcYww9N1sT4w3YL2xY4ltw',
