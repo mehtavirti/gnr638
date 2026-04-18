@@ -1,0 +1,11 @@
+transformers>=4.52.0
+accelerate
+qwen-vl-utils
+Pillow
+torchvision
+bitsandbytes
+sentencepiece
+torch>=2.0.0
+pandas
+numpy
+matplotlib
