@@ -880,11 +880,13 @@ def main():
 
         # ── SAVE AFTER EVERY PREDICTION (crash-safe) ──
         pd.DataFrame({
+            "id":         test_df["image_name"].values[:len(predictions)],
             "image_name": test_df["image_name"].values[:len(predictions)],
             "option":     predictions,
         }).to_csv(OUTPUT_PATH, index=False)
 
     submission_df = pd.DataFrame({
+        "id":         test_df["image_name"].values,
         "image_name": test_df["image_name"].values,
         "option":     predictions,
     })
