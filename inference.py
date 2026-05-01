@@ -730,12 +730,7 @@ def solve_mcq_image(image_path: str, verbose: bool = True) -> int:
         response = query_model(img, UNIVERSAL_PROMPT, temperature=0.0)
         if verbose:
             print(f"  Response:\n{response}")
-        if "FINAL ANSWER" not in response.upper():
-            if verbose:
-                print("  No FINAL ANSWER line → retrying once")
-            response = query_model(img, UNIVERSAL_PROMPT, temperature=0.0)
-            if verbose:
-                print(f"  Retry response:\n{response}")
+        
         # ── Confidence gate (protects negative marks)
         confidence = extract_confidence(response)
         if verbose:
