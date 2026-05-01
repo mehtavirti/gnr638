@@ -896,8 +896,13 @@ def main():
             f"Q: {q_time:.2f}s | Avg: {avg:.2f}s | ETA: {eta/60:.2f}m"
         )
 
+        # ── SAVE AFTER EVERY PREDICTION (crash-safe) ──
+        pd.DataFrame({
+            "image_name": test_df["image_name"].values[:len(predictions)],
+            "option":     predictions,
+        }).to_csv(OUTPUT_PATH, index=False)
+
     submission_df = pd.DataFrame({
-        "id":         test_df["image_id"].values,
         "image_name": test_df["image_name"].values,
         "option":     predictions,
     })
