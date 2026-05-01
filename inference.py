@@ -32,7 +32,7 @@ warnings.filterwarnings("ignore")
 # PATHS — model weights cached locally by setup.bash
 # ============================================================
 SCRIPT_DIR   = os.path.dirname(os.path.abspath(__file__))
-HF_MODEL_ID  = "/content/gnr638/model_3b"
+HF_MODEL_ID  = "/content/gnr638/model"
 OUTPUT_PATH  = os.path.join(SCRIPT_DIR, "submission.csv")
 
 # ============================================================
