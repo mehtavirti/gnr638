@@ -232,27 +232,13 @@ These facts are AUTHORITATIVE. If your intuition contradicts them, trust this ta
 • Gradient accumulation N steps → simulates LARGER effective batch size
 • Cosine annealing vs step decay: smooth transitions, avoids abrupt drops
  
-▌EFFICIENTNET & NEURAL ARCHITECTURE SCALING
-• EfficientNet uses COMPOUND SCALING — scales THREE dimensions simultaneously:
-  ★ Width (number of channels)
-  ★ Depth (number of layers)
-  ★ Resolution (input image size)
-  — NOT learning rate, NOT batch size, NOT dropout rate
-  — If an option says "width, depth, resolution" → that is correct for EfficientNet
- 
+
 ▌CONTINUAL LEARNING / TRANSFER LEARNING
 • Catastrophic forgetting (catastrophic interference):
   ★ When a neural network FORGETS previously learned tasks upon learning new ones
   ★ It is NOT about slow convergence, NOT about overfitting, NOT about vanishing gradients
   — Occurs because gradient updates for new task overwrite weights learned for old tasks
 • Fine-tuning pretrained CNN on small dataset: freeze EARLY conv layers (low-level features) first
-• Chest X-ray augmentation: VERTICAL FLIP is inappropriate (breaks anatomical orientation)
-
-▌SELF-ATTENTION COMPLEXITY
-• Self-attention compares ALL pairs of tokens
-    ★ Time complexity = O(n²)
-    ★ Memory complexity = O(n²)
-• NEVER O(n log n), NEVER O(n)
 
 ▌TRANSFORMERS & SELF-SUPERVISED
 • Original Transformer positional encoding: FIXED sinusoidal functions of position
@@ -261,14 +247,6 @@ These facts are AUTHORITATIVE. If your intuition contradicts them, trust this ta
 • SimCLR NT-Xent: same image different augmentations → similar; different images → far apart
 • Knowledge distillation soft targets: carry inter-class similarity information
 • VAE reparameterisation trick: makes sampling differentiable for backpropagation
-
-▌NEURAL ODE & ADVANCED
-★ Neural ODE backprop memory: O(1) via ADJOINT METHOD (NOT O(depth))
-★ MAML inner loop: requires Hessian-vector products (second-order gradients)
-★ DPO: trains WITHOUT separate reward model + WITHOUT RL loop
-  — DOES use human preference data — "without human pref" is WRONG
-★ Linear attention: rewrites via KERNEL FEATURE MAPS (NOT top-k, NOT sparse)
-★ Mamba/SSM: selective state space model, recurrent, linear O(n) (NOT sparse attention)
 
 ▌CONTRASTIVE & SELF-SUPERVISED 
 ★ CLIP zero-shot: compare image embedding to TEXT EMBEDDINGS of class names (NOT fine-tuning)
@@ -283,53 +261,19 @@ These facts are AUTHORITATIVE. If your intuition contradicts them, trust this ta
 ★ High bias (underfitting): HIGH training AND HIGH test error
 ★ Overfitting: LOW training, HIGH test error
 ★ Training loss > validation loss = UNDERFITTING — NOT overfitting
-★ Double descent: test error has SECOND DESCENT after initial peak
 ★ MC Dropout: N forward passes with Dropout ACTIVE at inference
 ★ Deep ensemble: M independent models from different random initialisations
 ★ Temperature scaling (calibration): divide logits by learned T on validation set
 ★ Conformal prediction: prediction set with valid coverage guarantee (≥1-α)
 ★ Zero-shot: NO examples; Few-shot: SMALL NUMBER of labelled examples
 ★ Domain adaptation (unsupervised): labelled source → unlabelled target
-★ PAC learning: O(1/ε × log(1/δ))
-★ No Free Lunch theorem: no single algorithm best for ALL problems
 ★ CNN inductive bias: TRANSLATION EQUIVARIANCE + LOCALITY
-★ Universal Approximation: 1 hidden layer + enough neurons approximates any continuous function
-★ Information Bottleneck: minimise I(Z;X), maximise I(Z;Y)
-
-▌TRANSFORMERS 
-★ Residual stream in Transformer = main activation vector that attention+FFN ADD to
-  — NOT ResNet skip connection; NOT gradient path; NOT output of layer norm
-★ Gradient magnitude in ResNet with L blocks: grows LINEARLY with L (NOT exponentially)
-★ Masked self-attention in decoder: prevents attending to FUTURE positions
-★ RoPE: rotates Q and K; applies to d_k/2 dimension pairs per head
-★ Prefix LM: bidirectional on prefix + causal on generation → "Both BERT and GPT"
-★ Learned positional embeddings (GPT-2): CANNOT generalise beyond training length
-★ BERT 15% masking: 80% [MASK], 10% unchanged, 10% random token
-★ Swin Transformer: SHIFTED WINDOW attention → linear complexity
-★ SwiGLU (LLaMA): replaces sigmoid with Swish/SiLU in gated linear unit
-★ Mixture of Depths (MoD): skips certain TOKENS at some layers
-★ Sliding window attention (Mistral): each token attends to w nearest → O(n×w)
-★ Perceiver: cross-attends from SMALL LATENT ARRAY to huge input
-★ T5: frames ALL tasks as text-to-text
-★ CFG higher w: HIGHER FIDELITY, LESS DIVERSE
 
 ▌NUMERICAL VALUES
 ★ exp(0)=1; exp(1)≈2.718; exp(-1)≈0.368; exp(-2)≈0.135
   — sigmoid(-1) ≈ 0.269 (NOT 0.5, NOT 0.368)
   — sigmoid(0) = 0.5
-  — -ln(0.368) ≈ 1.0
 - log(1)=0 (any base);  ln(e)=1
-★ Sigmoid range: OPEN (0,1) — NEVER exactly 0 or 1
-  — "exclusive" is correct; "[0,1] inclusive" is WRONG
-★ Cosine similarity for non-zero vectors: range is [-1, 1] (includes negatives)
-  — Anti-parallel = -1; orthogonal = 0; parallel = +1
-  — WRONG to say range is [0,1]
-- softmax([c,c,...,c]) = [1/n,...,1/n] for any constant c
-
-▌SOFTMAX & LOG-SUM-EXP
-- log-sum-exp trick: log(Σexp(z_i)) = max(z) + log(Σexp(z_i - max(z)))
-★ T→0: GREEDY (argmax) — NOT uniform. T→∞: uniform — NOT greedy.
-★ Softmax Jacobian: diagonal = s_i(1-s_i); off-diagonal = -s_i×s_j (NEGATIVE)
 
 ▌NORMALISATION 
 ★ Forgetting model.eval(): BN uses mini-batch stats from inference batch instead of running stats
@@ -354,35 +298,6 @@ These facts are AUTHORITATIVE. If your intuition contradicts them, trust this ta
 - torch.tensor: infers dtype from data
 - torch.Tensor: always FloatTensor
 - backward() twice without zero_grad(): gradients ACCUMULATE
-★ BF16 vs FP16: BF16 has same exponent bits as FP32 (8 bits) → larger DYNAMIC RANGE
-  — FP16: 5 exponent bits → smaller dynamic range
-  — BF16 advantage = DYNAMIC RANGE (NOT precision)
-- Embedding layer gradients: only for rows in CURRENT batch
-
-▌FINE-TUNING METHODS
-★ BitFit: fine-tunes ONLY BIAS TERMS
-★ Prompt tuning: trains only continuous prompt tokens prepended to input
-★ Prefix tuning: prepends trainable vectors to K and V in EACH attention layer (NOT Q)
-★ Adapter modules: inserted AFTER attention AND AFTER FFN sublayers
-★ LoRA (rank r): adds low-rank A,B matrices to frozen weights
-★ Parameter count ranking (fewest→most): BitFit < LoRA < Adapter < Prefix < Full fine-tuning
-★ Full fine-tuning: uses the MOST parameters
-
-▌DECODING & GENERATION
-★ Temperature T→0: GREEDY decoding (argmax)
-★ Top-k sampling k=1 = greedy = beam search beam=1
-★ Repetition penalty: reduces probability of tokens already in generated sequence
-★ Beam search: NOT guaranteed globally optimal (prunes paths early)
-★ CFG higher weight w: HIGHER FIDELITY, LESS DIVERSE (NOT more diverse)
-  — guided_score = (1+w)×score_cond - w×score_uncond
-★ Continuous batching: inserts new requests as sequences finish WITHOUT WAITING
-
-DISTRIBUTED TRAINING & EFFICIENCY
-★ Tensor parallelism requires AllReduce (NOT AllGather only)
-★ ZeRO stage 3: shards optimizer states + gradients + model parameters
-★ Flash Attention 2 vs FA1: better parallelism + fewer non-matmul FLOPs
-★ PagedAttention (vLLM): KV cache in fixed-size blocks → reduces fragmentation
-★ Continuous batching: insert new requests as sequences finish
 
 ════════════════════════════════════════════════
 STEP 2 — SOLVE the question carefully
