@@ -48,15 +48,15 @@ MIN_VOTES_TO_ANSWER = 1
 # PROMPT  (v3 — stronger fact authority + confidence gate)
 # ============================================================
 UNIVERSAL_PROMPT = """You are an expert deep learning engineer and mathematician. You can read every character in the image perfectly.
-
+ 
 The image contains ONE multiple-choice question with exactly 4 options labeled 1/2/3/4 OR A/B/C/D (A=1, B=2, C=3, D=4).
-
+ 
 ════════════════════════════════════════════════
 STEP 1 — CHECK FORMULA/FACT TABLE FIRST
 Before doing ANY reasoning, look up the relevant formula or fact below.
 These facts are AUTHORITATIVE. If your intuition contradicts them, trust this table.
 ════════════════════════════════════════════════
-
+ 
 ▌PARAMETER COUNTS
 • Conv2D params WITH bias: out_ch × (in_ch × k_h × k_w + 1)
   — The "+1" is the bias PER output channel, giving +out_ch total bias params
@@ -64,14 +64,20 @@ These facts are AUTHORITATIVE. If your intuition contradicts them, trust this ta
   — Example: Conv2d(in=3, out=64, k=3×3) WITHOUT bias → 64 × 3×3×3 = 1728
 • FC (Linear) params with bias: (in_features × out_features) + out_features
 • LSTM total params: 4 × [hidden × (input + hidden) + hidden]
+  — LSTM has 4 gates: input, forget, output, cell gate
   — Example: input=10, hidden=20 → 4 × [20×(10+20) + 20] = 4×620 = 2480
+• GRU total params: 3 × [hidden × (input + hidden) + hidden]
+  ★ GRU has ONLY 3 gates: reset, update, new/candidate gate (NOT 4 like LSTM)
+  ★ NEVER use the LSTM formula (×4) for GRU — it MUST be ×3
+  — Example: input=10, hidden=20 → 3 × [20×(10+20) + 20] = 3×620 = 1860  (NOT 2480)
+  — If you see answer choices 1860 vs 2480 for a GRU question, 1860 is correct
 • BatchNorm1d/2d learnable params: 2 × num_features  (γ scale + β shift)
 • nn.Embedding params: vocab_size × embedding_dim  (no extra terms)
 • ViT patch tokens: (image_size / patch_size)²
   — Example: 224×224 image, 16×16 patches → (224/16)² = 14² = 196 tokens
 • Per-head dim in multi-head attention: d_k = d_model / n_heads
   — Example: d_model=512, 8 heads → d_k = 512/8 = 64
-
+ 
 ▌SPATIAL SIZE FORMULAS
 • Conv2D output: floor((input + 2×padding − kernel) / stride) + 1
   — Example: input=32, k=5, s=1, p=0 → floor((32+0−5)/1)+1 = 28
@@ -82,23 +88,51 @@ These facts are AUTHORITATIVE. If your intuition contradicts them, trust this ta
 • Effective receptive field of N stacked (k×k, s=1, no-pad) conv layers: N×(k−1)+1
   ★ TWO 3×3 conv layers → 2×(3−1)+1 = 5×5   (NOT 9×9)
   ★ THREE 3×3 conv layers → 3×(3−1)+1 = 7×7
-
+ 
+▌FLOPS / COMPUTE
+• FLOPs for a Linear(M→N) layer on a SINGLE sample: M×N multiplications + M×N additions = 2×M×N
+  — If batch size is B: total FLOPs = B × 2 × M × N
+  ★ For a batch of B samples through Linear(M,N): answer is B×M×N (multiply-accumulate) or 2×B×M×N (full FLOPs)
+  — Pick the option that matches B×M×N; do NOT pick B×N or M×N alone
+• FLOPs for Conv2D output spatial H_out×W_out, with kernel k×k, in_ch C_in, out_ch C_out:
+  — per output element: 2 × C_in × k × k  (MAC operations)
+  — total: 2 × C_in × k² × C_out × H_out × W_out
+ 
 ▌LOSS FUNCTIONS
 • Cross-entropy for one sample: −log(p_correct)
-  — Example: true class prob=0.7 → −log(0.7) ≈ 0.357  (NOT 0.699, NOT 0.155)
+  — Example: true class prob=0.8 → −log(0.8) ≈ 0.097  (NOT 0.699, NOT 0.155, NOT 0.223)
+  — Example: true class prob=0.7 → −log(0.7) ≈ 0.357
+  ★ Use natural log (ln), NOT log base 10
 • nn.CrossEntropyLoss in PyTorch:
   ★ EXPECTS RAW LOGITS (before any softmax or log-softmax)
   ★ It applies log-softmax internally — do NOT pass softmax output
 • Focal loss: DOWN-WEIGHTS easy, well-classified examples; up-weights hard ones
 • CTC loss: sequence-to-sequence tasks with UNALIGNED input/output (speech, OCR)
-• KL divergence: NOT symmetric; always ≥ 0; equals 0 IFF P = Q exactly
-
+• KL divergence:
+  ★ NOT symmetric: KL(P||Q) ≠ KL(Q||P) in general
+  ★ BOTH KL(P||Q) and KL(Q||P) are always ≥ 0  — they are NEVER negatives of each other
+  ★ They are not equal AND they are not negatives → the correct answer is "asymmetric"
+  ★ Equals 0 IFF P = Q exactly
+ 
+▌CLASSIFICATION METRICS — COMPUTE CAREFULLY
+• Precision    = TP / (TP + FP)
+• Recall       = TP / (TP + FN)
+• F1 score     = 2 × Precision × Recall / (Precision + Recall)
+  ★ WORKED EXAMPLE: Precision=0.8, Recall=0.6
+    F1 = 2×0.8×0.6 / (0.8+0.6) = 0.96/1.4 ≈ 0.686   (NOT 0.70, NOT 0.75, NOT 0.72)
+  ★ Another example: Precision=0.9, Recall=0.75
+    F1 = 2×0.9×0.75 / (0.9+0.75) = 1.35/1.65 ≈ 0.818
+• Accuracy     = (TP + TN) / (TP + TN + FP + FN)
+• Recall from counts: Recall = TP / (TP + FN) = (correctly predicted positives) / (total actual positives)
+  — Example: 90 correctly predicted out of 120 actual positives → Recall = 90/120 = 0.75
+• AUC-ROC of a random classifier = 0.5
+ 
 ▌ACTIVATION FUNCTIONS & GRADIENTS
 • Sigmoid/Tanh: saturate → vanishing gradients; derivative → 0 for large |z|
 • ReLU: gradient = 1 for positive inputs → LEAST prone to vanishing gradients
 • Dead ReLU: input always negative → gradient always 0 → weights NEVER update
 • Sigmoid derivative at large positive z ≈ 0  (saturated region)
-
+ 
 ▌SOFTMAX & TEMPERATURE
 • Softmax formula: softmax(z/T)_i = exp(z_i/T) / Σ exp(z_j/T)
 • Higher temperature T → distribution becomes SOFTER / MORE UNIFORM (probabilities closer together)
@@ -106,33 +140,52 @@ These facts are AUTHORITATIVE. If your intuition contradicts them, trust this ta
 ★ T→∞: uniform distribution.  T→0: one-hot (argmax).
 • Softmax is invariant to adding any constant to all logits (constant cancels in fraction)
 • Scaled dot-product attention: softmax(Q·Kᵀ / √d_k) · V
-
+ 
+▌MULTI-HEAD ATTENTION — OUTPUT DIMENSIONS
+• Each head computes attention over d_k = d_model / n_heads dimensions
+• Each head output shape: (seq_len, d_k)
+• CONCATENATION of all heads: concat of n_heads × d_k = n_heads × (d_model/n_heads) = d_model
+  ★ Concatenated output dimension = d_model  (NOT n_heads × d_model)
+  ★ Example: 8 heads, d_model=512 → each head dim=64; concat=8×64=512  (NOT 8×512=4096)
+• Final linear projection maps d_model → d_model (does not change dimension)
+ 
 ▌WEIGHT INITIALISATION
 • Xavier / Glorot → designed for Sigmoid and Tanh (linear-like activations)
 • He / Kaiming   → designed for ReLU and its variants (Leaky ReLU, PReLU, ELU)
-
-▌REGULARISATION
+ 
+▌REGULARISATION & PRUNING
 • L1 (Lasso) → sparsity (drives weights to exactly 0)
 • L2 (Ridge / weight decay) → keeps weights small but non-zero
 • Dropout: ACTIVE during training, DISABLED during model.eval()
 • Gradient clipping → prevents EXPLODING gradients
-
+• Magnitude-based pruning (weight pruning):
+  ★ Removes weights with SMALLEST absolute values (closest to zero)
+  ★ NEVER removes largest absolute value weights
+  — If asked "which weights are pruned first" → answer is smallest magnitude / near-zero weights
+ 
 ▌NORMALISATION
-• BatchNorm at inference: uses RUNNING mean & running variance (not mini-batch stats)
-• LayerNorm: normalises across FEATURE dimensions per sample
+• BatchNorm DURING TRAINING: uses CURRENT MINI-BATCH mean and variance
+  ★ During training it does NOT use running statistics — it uses the batch itself
+• BatchNorm DURING INFERENCE/EVAL: uses accumulated RUNNING mean & running variance
+  ★ Running statistics are computed and updated DURING TRAINING (not during eval)
+  — Summary: running stats are UPDATED in training, USED in inference
+• LayerNorm: normalises across FEATURE dimensions per sample (independent of batch size)
 • BatchNorm: normalises across the BATCH dimension
 • GroupNorm with 1 group = LayerNorm
 • GroupNorm with group_size = 1 = InstanceNorm
 • model.eval() does TWO things: (1) switches BatchNorm to running stats AND (2) disables Dropout
   ★ model.eval() does NOT disable gradient computation (that is torch.no_grad())
   ★ model.eval() does NOT affect gradient computation at all
-
-▌OPTIMISERS
-• SGD: fixed learning rate, optional momentum
-• RMSProp: adaptive per-parameter rates, NO momentum
+ 
+▌OPTIMISERS & MOMENTUM
+• SGD with momentum: uses EXPONENTIALLY DECAYED weighted sum of past gradients
+  ★ Momentum is NOT a simple equal-weight average of past gradients
+  ★ Recent gradients are weighted MORE than older gradients (exponential decay)
+  — v_t = β × v_{t-1} + (1-β) × g_t   where β is momentum coefficient (typically 0.9)
+• RMSProp: adaptive per-parameter rates, NO momentum by default
 • Adam: COMBINES momentum + per-parameter adaptive rates  ← "momentum + adaptive" = Adam
 • Adagrad: adaptive, monotonically shrinking learning rate
-
+ 
 ▌PYTORCH TRAINING LOOP ORDER
 1. optimizer.zero_grad()   ← FIRST — clear old gradients
 2. output = model(input)
@@ -140,7 +193,13 @@ These facts are AUTHORITATIVE. If your intuition contradicts them, trust this ta
 4. loss.backward()
 5. optimizer.step()
 • torch.no_grad(): disables gradient computation → saves memory; does NOT freeze weights
-
+ 
+▌model.parameters() AND FROZEN LAYERS
+• model.parameters() returns ALL parameters in the model, including frozen ones
+  ★ Freezing a layer (requires_grad=False) does NOT remove it from model.parameters()
+  ★ To get only trainable params: filter(lambda p: p.requires_grad, model.parameters())
+• torch.no_grad(): disables gradient computation → saves memory; does NOT freeze weights
+ 
 ▌ARCHITECTURES & TRAINING TRICKS
 • ResNet residual block: output = F(x) + x   (identity shortcut = x, not F(x), not W·x)
 • U-Net skip connections: recover spatial detail LOST during downsampling
@@ -151,7 +210,23 @@ These facts are AUTHORITATIVE. If your intuition contradicts them, trust this ta
 • Large batch sizes → converge to sharp minima → poorer generalisation
 • Gradient accumulation N steps → simulates LARGER effective batch size
 • Cosine annealing vs step decay: smooth transitions, avoids abrupt drops
-
+ 
+▌EFFICIENTNET & NEURAL ARCHITECTURE SCALING
+• EfficientNet uses COMPOUND SCALING — scales THREE dimensions simultaneously:
+  ★ Width (number of channels)
+  ★ Depth (number of layers)
+  ★ Resolution (input image size)
+  — NOT learning rate, NOT batch size, NOT dropout rate
+  — If an option says "width, depth, resolution" → that is correct for EfficientNet
+ 
+▌CONTINUAL LEARNING / TRANSFER LEARNING
+• Catastrophic forgetting (catastrophic interference):
+  ★ When a neural network FORGETS previously learned tasks upon learning new ones
+  ★ It is NOT about slow convergence, NOT about overfitting, NOT about vanishing gradients
+  — Occurs because gradient updates for new task overwrite weights learned for old tasks
+• Fine-tuning pretrained CNN on small dataset: freeze EARLY conv layers (low-level features) first
+• Chest X-ray augmentation: VERTICAL FLIP is inappropriate (breaks anatomical orientation)
+ 
 ▌TRANSFORMERS & SELF-SUPERVISED
 • Original Transformer positional encoding: FIXED sinusoidal functions of position
 • Weight tying: input embedding matrix tied to output projection layer
@@ -159,12 +234,7 @@ These facts are AUTHORITATIVE. If your intuition contradicts them, trust this ta
 • SimCLR NT-Xent: same image different augmentations → similar; different images → far apart
 • Knowledge distillation soft targets: carry inter-class similarity information
 • VAE reparameterisation trick: makes sampling differentiable for backpropagation
-• AUC-ROC of a random classifier = 0.5
-
-▌TRANSFER LEARNING & AUGMENTATION
-• Fine-tuning pretrained CNN on small dataset: freeze EARLY conv layers (low-level features) first
-• Chest X-ray augmentation: VERTICAL FLIP is inappropriate (breaks anatomical orientation)
-
+ 
 ════════════════════════════════════════════════
 STEP 2 — SOLVE the question carefully
 Read ALL 4 options completely. Do NOT assume.
