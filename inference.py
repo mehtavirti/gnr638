@@ -62,13 +62,11 @@ These facts are AUTHORITATIVE. If your intuition contradicts them, trust this ta
   — Example: Conv2d(in=3, out=64, k=3×3, bias=True)  → 64×(3×3×3+1) = 64×28 = 1792
   — Example: Conv2d(in=3, out=64, k=3×3, bias=False) → 64×3×3×3 = 1728
   — Example: Conv2d(256,64,k=1,bias=False) → 64×256×1×1 = 16384
-★ Conv2D with groups: out_ch × (in_ch/groups) × k_h × k_w   (no bias here)
-  — Example: Conv2d(32,64,k=3,groups=2,bias=False) → 64×(32/2)×3×3 = 64×16×9 = 9216
-  — Depthwise Conv2d(C,C,k,groups=C,bias=False): C × k × k (each channel its own filter)
+• Conv2D with groups (depthwise): out_ch × (in_ch/groups × k_h × k_w + bias_per_group)
+  — Example: Conv2d(32,64,k=3,groups=2,bias=False) → (64/2)×(32/2×3×3)×2 = 32×144 = 9216... 
+    Simpler: total = out_ch × (in_ch/groups) × k_h × k_w = 64×16×9 = 9216
+  — Depthwise Conv2d(C,C,k,groups=C,bias=False): C × k × k
     Example: Conv2d(32,32,3,groups=32,bias=False) → 32×3×3 = 288
-★ TRAP — Conv2d groups=2 is NOT the same as depthwise (groups=C):
-  — groups=2 on Conv2d(32,64,3): params = 64×(32/2)×3×3 = 9216  ← correct
-  — Do NOT use 64×32×9 = 18432 when groups=2; that ignores the group split
 • FC (Linear) params with bias: (in_features × out_features) + out_features
   — Example: Linear(512,10) → 512×10 + 10 = 5130
 • LSTM total params: 4 × [hidden × (input + hidden) + hidden]
@@ -77,6 +75,7 @@ These facts are AUTHORITATIVE. If your intuition contradicts them, trust this ta
 ★ GRU total params: 3 × [hidden × (input + hidden) + hidden]
   — GRU has only 3 gates: reset, update, new  ← NOT 4 like LSTM
   — Example: input=10, hidden=20 → 3×[20×30+20] = 3×620 = 1860
+  — Example: GRU(256,512) → 3×[512×(256+512)+512] = 3×[512×768+512] = 3×394240 = 1,182,720
 • BatchNorm1d/2d learnable params: 2 × num_features  (γ + β)
 • nn.Embedding params: vocab_size × embedding_dim
 • ViT patch tokens: (image_size / patch_size)²
@@ -89,268 +88,238 @@ These facts are AUTHORITATIVE. If your intuition contradicts them, trust this ta
   — 1×1 conv: 256×64 = 16384
   — 3×3 conv: 64×64×9 = 36864
   — 1×1 conv: 64×256 = 16384
-  — Total: 69632
+  — Total: 69632  (plus BN params)
  
 ▌SPATIAL SIZE FORMULAS
-• Conv2D output: floor((input + 2×padding − dilation×(kernel−1) − 1) / stride) + 1
-  — Standard (dilation=1): floor((input + 2×padding − kernel) / stride) + 1
-  — Example: in=10, k=3, s=1, p=0, d=1: floor((10+0-1*(3-1)-1)/1)+1 = floor(7)+1 = 8
-  — Example: in=15, k=3, s=1, p=0, d=3: floor((15+0-3*(3-1)-1)/1)+1 = floor(8)+1 = 9
-★ ALWAYS USE: floor((in + 2p - d*(k-1) - 1) / s) + 1   (the full formula with dilation)
+• Conv2D output: floor((input + 2×padding − kernel) / stride) + 1
 • MaxPool / AvgPool output: floor((input + 2×padding − kernel) / stride) + 1
   — Example: AvgPool(6×6, k=3, s=2, p=0): floor((6-3)/2)+1 = 2×2
+  — Example: MaxPool(5×5, k=3, s=1, p=1): floor((5+2-3)/1)+1 = 5×5 (same-padding)
 • ConvTranspose2d: output = (input-1)×stride - 2×padding + kernel
+  — Example: ConvTranspose2d(3×3, k=3, s=1, p=0): (3-1)×1 - 0 + 3 = 5×5
+  — Example: ConvTranspose2d(4×4, stride=2, k=3, p=1): (4-1)×2 - 2 + 3 = 7... use formula
 • Effective receptive field: N×(k−1)+1  for N stacked k×k layers (s=1, no pad)
-  ★ TWO 3×3 → 5×5;  THREE 3×3 → 7×7;  FOUR 3×3 → 9×9
-• Dilated conv effective size: kernel + (kernel−1)×(dilation−1) = dilation×(kernel−1)+1
+  ★ TWO   3×3 → 5×5;  THREE 3×3 → 7×7
+• Dilated conv effective size: k + (k−1)×(dilation−1)
   — k=3, dilation=2 → 5×5;  k=3, dilation=3 → 7×7
 • nn.AdaptiveAvgPool2d((1,1)) on (B,C,H,W) → (B,C,1,1)
-★ GlobalAvgPool on (B,C,H,W) → (B,C,1,1)  NOT (B,C)
-★ nn.Linear on (B,...,in) → (B,...,out) — ONLY last dimension changes
-  — Example: Linear(10,5) on (32,7,10) → (32,7,5)
+• GlobalAvgPool on (B,C,H,W) → (B,C,1,1)  NOT (B,C)
+• nn.Linear on (B,...,in) → (B,...,out) — only last dimension changes
+  — Example: Linear(10,5) on (32,7,10) → (32,7,5)  NOT (32,7,10)
 • nn.Flatten(start_dim=1) on (B,C,H,W) → (B, C×H×W)
-  — Example: (8,16,4,4) → (8, 16×4×4) = (8, 256)  NOT 16
+  — Example: (8,16,4,4) → (8, 16×4×4) = (8, 256)
  
 ▌FLOPS
 ★ Matrix multiply A(m×k) × B(k×n): FLOPs ≈ m × k × n  multiply-adds
-  — The INNER dimension k is always in the formula — do NOT use just m×n
+  — NOT m×n alone; k (inner dimension) is the key multiplier
+  — Example: (100×512)×(512×256): FLOPs ≈ 100×512×256 = 13,107,200
 ★ FLOPs for Linear(M,N) on batch B: B × M × N  (NOT B×M, NOT M×N)
-★ FLOPs for Conv2d per output spatial position (one output element): C_in × K × K
+★ FLOPs for Conv2d per output element: C_in × K × K
   — Total Conv FLOPs ≈ C_in × K × K × C_out × H_out × W_out
-★ FLOPs for DEPTHWISE Conv: C × K × K × H_out × W_out  (one filter per channel)
-  — Example: C=32, k=3×3, H_out=8, W_out=8 → 32 × 9 × 64 = 18432
-  — This equals option "32*9*64" in a list  ← option A, NOT option C
 • Attention QKᵀ FLOPs ≈ n²×d  (quadratic in sequence length n)
+• QKV projection FLOPs: 3 × B × seq_len × d_model × d_model
 • INT8 vs FP32: ~4× smaller;  FP16 vs FP32: ~2× smaller
-★ INT4 vs FP32: 32/4 = 8× smaller  (NOT 4×, NOT 2×)
-  — 100M params: FP32≈400MB; FP16≈200MB; INT8≈100MB; INT4≈50MB
+★ INT4 vs FP32: 32/4 = 8× smaller  (NOT 4×)
+  — 100M params FP32 ≈ 400MB;  FP16 ≈ 200MB;  INT8 ≈ 100MB;  INT4 ≈ 50MB
  
 ▌LOSS FUNCTIONS & METRICS
-★ In ML/deep learning, log = NATURAL LOG (base e) UNLESS stated otherwise
-  — log(0.5) = ln(0.5) ≈ -0.693  →  -log(0.5) ≈ 0.693  (NOT 0.301 which is log₁₀)
-  — -log₁₀(0.5) ≈ 0.301 — only use this if question explicitly says "log base 10"
 • Cross-entropy: −ln(p_correct)
-  — p=0.9 → 0.105;  p=0.8 → 0.223;  p=0.7 → 0.357
-  — p=0.5 → 0.693;  p=0.25 → 1.386;  p=0.1 → 2.303
-  — p=1.0 → 0  (perfect prediction = zero loss — NOT infinity, NOT undefined)
-  — p=0.368 ≈ e^{-1} → -ln(0.368) ≈ 1.0  (NOT 0.5)
-★ -ln(0.25) = -ln(1/4) = ln(4) ≈ 1.386  (NOT 0.693 which is -ln(0.5))
+  — p=0.8 → −ln(0.8) ≈ 0.223;  p=0.7 → −ln(0.7) ≈ 0.357
+  — p=0.5 → −ln(0.5) ≈ 0.693;  p=0.1 → −ln(0.1) ≈ 2.303
+  — p=1.0 → −ln(1.0) = 0  (perfect prediction = zero loss)
+  — p=0.368 ≈ e^(-1) → −ln(0.368) ≈ 1.0
+  — p=0.25 → −ln(0.25) = ln(4) ≈ 1.386  (4-class uniform)
 ★ F1 Score = 2×P×R / (P+R)  ← harmonic mean
   — P=0.8, R=0.6 → 2×0.48/1.4 = 0.686
   — P=1.0, R=0.5 → 2×0.5/1.5 = 0.667
   — P=0.7, R=0.5 → 2×0.35/1.2 = 0.583
 • Precision = TP/(TP+FP);  Recall = TP/(TP+FN);  Accuracy = (TP+TN)/(TP+TN+FP+FN)
 • nn.CrossEntropyLoss: expects RAW LOGITS (applies log-softmax internally)
-  ★ NEVER apply softmax before CrossEntropyLoss → double-softmax → inflated loss
+  ★ NEVER apply softmax before CrossEntropyLoss → double-softmax → WRONG predictions
 ★ KL divergence: NOT symmetric, always ≥ 0, equals 0 only when P=Q exactly
   — KL(P||Q) and KL(Q||P) are NOT negatives of each other (both ≥ 0)
   — KL divergence is NOT a proper metric (does NOT satisfy triangle inequality)
-★ KL asymmetry example: P=[0.9,0.1], Q=[0.5,0.5]
-  — KL(P||Q) = 0.9*ln(0.9/0.5)+0.1*ln(0.1/0.5) ≈ 0.9*0.588+0.1*(-1.609) ≈ 0.529-0.161 ≈ 0.368
-  — KL(Q||P) = 0.5*ln(0.5/0.9)+0.5*ln(0.5/0.1) ≈ 0.5*(-0.588)+0.5*1.609 ≈ -0.294+0.805 ≈ 0.511
-  — KL(P||Q) < KL(Q||P)  →  KL(P||Q) < KL(Q||P)  for peaked P, uniform Q
-★ MSE([1,2,3],[2,2,2]) = ((1-2)²+(2-2)²+(3-2)²)/3 = 2/3 ≈ 0.667
+★ MSE([1,2,3],[2,2,2]) = ((1-2)²+(2-2)²+(3-2)²)/3 = 2/3
  
 ▌NUMERICAL VALUES (memorise these)
 ★ exp(0) = 1;  exp(1) ≈ 2.718;  exp(-1) ≈ 0.368;  exp(-2) ≈ 0.135
-  — sigmoid(-1) = 1/(1+e) ≈ 1/3.718 ≈ 0.269  (NOT 0.5, NOT 0.368)
+  — sigmoid(-1) = 1/(1+e) ≈ 1/3.718 ≈ 0.269
   — sigmoid(0) = 0.5
-  — -ln(0.368) ≈ 1.0  (since ln(e^{-1}) = -1, so -ln(e^{-1}) = 1)
-• log(1) = 0  (any base);  ln(e) = 1
-★ -ln(0.5) ≈ 0.693  ←  use natural log NOT log₁₀
-  — -log₁₀(0.5) ≈ 0.301 — only if question explicitly says base 10
-★ Sigmoid range: (0,1)  OPEN interval — output is strictly between 0 and 1
-  — sigmoid NEVER reaches exactly 0 or 1, no matter the input
-  — Correct: "(0, 1) exclusive";  WRONG: "[0, 1] inclusive"
-★ Cosine similarity for NON-ZERO vectors: range is [-1, 1]  (includes negative values)
-  — Anti-parallel vectors give cosine = -1;  orthogonal = 0;  parallel = +1
-  — WRONG to say range is [0, 1] — that ignores anti-parallel case
-• softmax([c,c,...,c]) = [1/n, 1/n, ..., 1/n] for any constant c
+• log(1) = 0  (any base);  ln(e) = 1;  log₂(1) = 0
+• -ln(0.5) ≈ 0.693  (natural log);  -log₁₀(0.5) ≈ 0.301
+• -ln(0.368) ≈ 1.0  (since 0.368 ≈ e^{-1})
+• Sigmoid range: (0,1) open interval — never reaches exactly 0 or 1
+• Cosine similarity range for non-zero vectors: [-1, 1]
+• softmax([c,c,...,c]) = [1/n, 1/n, ..., 1/n] for any constant c (including large values)
   — softmax([2,2,2,2]) = [0.25, 0.25, 0.25, 0.25]
  
 ▌SOFTMAX & LOG-SUM-EXP
 • log-sum-exp trick: log(Σexp(z_i)) = max(z) + log(Σexp(z_i - max(z)))
   — Valid because shifted values z_i - max(z) ≤ 0, so exp(z_i-max(z)) ≤ 1 → no overflow
 • Higher T → softer/more uniform;  Lower T → sharper;  T→0 → one-hot (greedy/argmax)
-★ T→0: output becomes GREEDY (argmax) — NOT uniform. T→∞: uniform (NOT greedy).
 • Softmax invariant to adding constant to all logits
-★ Softmax Jacobian: diagonal = s_i(1-s_i);  off-diagonal (i≠j) = -s_i × s_j  (NEGATIVE)
  
 ▌NORMALISATION
 ★ BatchNorm DURING TRAINING: uses CURRENT MINI-BATCH mean & variance
-★ BatchNorm DURING INFERENCE: uses RUNNING mean & variance (accumulated during training)
-★ Running stats updated ONLY during training (EMA): running = (1-m)×running + m×batch_mean
-  — Running stats are NOT updated during eval; NOT simply = batch_mean
-★ Forgetting model.eval() before inference: BN uses MINI-BATCH stats from the inference batch
-  — Correct fill-in: "uses mini-batch stats from inference batch INSTEAD OF running stats"
-  — The blank order in the question matters: [without eval] → [with eval] = [mini-batch / running]
-★ Sigmoid range: OPEN (0,1) — never exactly 0 or 1
+★ BatchNorm DURING INFERENCE: uses RUNNING mean & variance
+★ Running stats updated ONLY during training (EMA): (1−m)×running + m×batch_mean
+  — NOT updated during eval; NOT simply batch_mean; NOT global dataset mean
+• LayerNorm: normalises across feature dims per sample — works fine at batch_size=1
 • BatchNorm batch_size=1 during TRAINING: undefined (variance=0, division by zero)
-★ LayerNorm with batch_size=1: works correctly (normalises over features, not batch dim)
+• BatchNorm epsilon ε: added to variance BEFORE sqrt to prevent division by zero
+• Forgetting model.eval(): BN uses mini-batch stats → stochastic/wrong inference
 • GroupNorm(1 group) = LayerNorm;  GroupNorm(group_size=1) = InstanceNorm
-★ BN epsilon ε: added to variance before sqrt → prevents division by zero when variance=0
  
 ▌ACTIVATION FUNCTIONS & GRADIENTS
-• ReLU: gradient=1 for x>0, 0 for x<0 → least prone to vanishing gradients
+• ReLU: gradient=1 for x>0 → least prone to vanishing gradients
 • Sigmoid/Tanh: saturate → vanishing gradients
-• Sigmoid derivative peak at z=0: 0.25 (NOT 0.5, NOT 1.0)
+• Sigmoid derivative at z=0: 0.25;  at large |z|: ≈ 0
 • Leaky ReLU(x=−5, α=0.01) = −0.05
 • GELU(0) = 0;  Swish(x→+∞) → x (linear)
-★ L1 gradient for w>0: exactly 1  (the sign of w — NOT w, NOT 2w)
+★ L1 gradient for w>0: = 1  (NOT w, NOT 2w)
 • L2 gradient: 2w
-★ All-zeros init: symmetry breaking failure — ALL neurons learn identical features, no learning
-★ Softmax Jacobian off-diagonal element ∂s_i/∂z_j for i≠j: = -s_i × s_j  (NEGATIVE)
-★ Vanishing gradient through N sigmoid layers: ≤ 0.25^N
-  — 10 sigmoid layers: 0.25^10 ≈ 9.5×10^{-7} (essentially zero; option A is this value)
-★ Full batch gradient descent main disadvantage: EXTREMELY SLOW per update + large memory requirement
-  — "Noisy gradient estimates" is a characteristic of SGD / mini-batch GD — NOT full batch
-  — Full batch has the LEAST noisy gradient; the problem is computational cost
+★ All-zeros init: symmetry breaking failure — ALL neurons learn identical features
+★ Softmax Jacobian: diagonal = s_i(1-s_i);  off-diagonal = -s_i × s_j  (i≠j)
+★ Vanishing gradient through N sigmoid layers: gradient ≤ 0.25^N → near zero for large N
+  — 10 sigmoid layers: 0.25^10 ≈ 9.5×10^{-7}  (essentially zero)
  
 ▌OPTIMISERS & TRAINING
 ★ SGD momentum: EXPONENTIALLY DECAYED past gradients (NOT equal-weight sum)
 • Adam: beta1 = first moment (mean); beta2 = second moment (variance)
-• Adam bias correction at t=1, β=0.9: m̂ = m/(1-0.9) = m/0.1 = 10×m (scales UP by 10)
+• Adam bias correction at t=1, β=0.9: m̂ = m/(1-0.9^1) = m/0.1 = 10×m (scales UP by 10)
 • Weight init:
-  — He init: std = sqrt(2/fan_in);  Example: Linear(512,256): sqrt(2/512) ≈ 0.0625
-  — Xavier init: std = sqrt(2/(fan_in+fan_out));  Example: sqrt(2/768) ≈ 0.051
-★ One Cycle LR policy: LR increases to maximum then DECREASES (with optional final annealing)
-★ Training loss ↓ but validation loss ↑ = OVERFITTING
-★ Training loss HIGHER than validation loss = sign of UNDERFITTING  ← NOT a sign of overfitting
+  — He init: Var(W) = 2/fan_in → std = sqrt(2/fan_in)
+    Example: Linear(512,256) → std = sqrt(2/512) ≈ 0.0625
+  — Xavier init: Var(W) = 2/(fan_in+fan_out) → std = sqrt(2/(fan_in+fan_out))
+    Example: Linear(512,256) → std = sqrt(2/768) ≈ 0.051
+★ Full batch gradient descent disadvantage: VERY SLOW per update (expensive on large datasets)
+  — Noisy gradient is the characteristic of MINI-BATCH / SGD, NOT full batch
+★ One Cycle LR policy: LR increases to maximum then decreases (with optional final annealing)
+★ Training loss ↓ but validation loss ↑ = OVERFITTING (not underfitting)
+★ Training loss HIGHER than validation loss = sign of UNDERFITTING (not overfitting)
+  — This is NOT a sign of overfitting
  
 ▌PYTORCH SPECIFICS
-• model.eval(): switches BN to running stats + disables Dropout automatically
-★ model.train() during inference: activates Dropout AND uses mini-batch BN stats
-  — Makes predictions STOCHASTIC and INACCURATE — NOT "freeze all parameters"
-★ nn.Dropout: respects model.train()/eval() AUTOMATICALLY — SAFER in custom forward
-  ★ F.dropout: requires explicit training=True/False — NOT automatic — less safe
-  — SAFER = nn.Dropout, not F.dropout
+• model.eval(): switches BN to running stats + disables Dropout
+  ★ model.train() during inference: activates Dropout + uses mini-batch BN stats → WRONG
+★ nn.Dropout: respects model.train()/eval() AUTOMATICALLY
+  ★ F.dropout: needs explicit training=True/False — NOT automatic
+  — nn.Dropout is SAFER in custom forward pass (auto-respects eval mode)
 • model.parameters(): returns ALL params including frozen (requires_grad=False)
-• torch.tensor: infers dtype from data;  torch.Tensor: always creates FloatTensor
+• torch.tensor: infers dtype from data
+• torch.Tensor: always creates FloatTensor
 • backward() twice without zero_grad(): gradients ACCUMULATE (add up)
 ★ Applying softmax BEFORE nn.CrossEntropyLoss = WRONG (double softmax, inflates loss)
-• Embedding layer gradients: only for rows in CURRENT batch
+• Embedding layer gradients: only for rows corresponding to tokens in CURRENT batch
 • model.half() → converts to FP16
 ★ BF16 vs FP16: BF16 has SAME exponent bits as FP32 (8 bits) → larger DYNAMIC RANGE
-  — FP16 has 5 exponent bits → smaller dynamic range but more mantissa bits (more precision)
-  — BF16's advantage over FP16 is DYNAMIC RANGE (avoids overflow), NOT precision
+  — FP16 has more mantissa bits → more precision but smaller range
+  — BF16 advantage is DYNAMIC RANGE, not precision
  
 ▌ARCHITECTURES & TRAINING TRICKS
 • ResNet: output = F(x) + x
 ★ Residual stream in Transformer = main activation vector that attention + FFN ADD to
-  — NOT "the skip connection in ResNet" — that is a different concept
-  — NOT the gradient path; NOT the output of layer norm
-★ Gradient magnitude in ResNet with L blocks grows LINEARLY with L (identity adds a term)
-  — NOT exponentially; linear because identity shortcut adds a term at each level
+  — NOT the skip connection in ResNet; NOT the gradient path
+★ Gradient magnitude in ResNet with L blocks grows LINEARLY with L
+  — Identity path adds a term at each level → linear, NOT exponential
+• U-Net skip connections: recover spatial detail lost during downsampling
 • EfficientNet scales: WIDTH + DEPTH + RESOLUTION simultaneously
 ★ Catastrophic forgetting: model loses performance on OLD tasks when training on NEW tasks
+  — EWC prevents it by penalising changes to important weights (Fisher information)
  
 ▌TRANSFORMERS & ATTENTION
 • GPT: causal (left-to-right);  BERT: bidirectional
   — BERT pre-training: MLM + Next Sentence Prediction (NSP)
 ★ Masked self-attention in decoder: prevents attending to FUTURE positions
-★ RoPE: rotates Q and K in attention computation; applies to d_k/2 dimension pairs per head
-★ Prefix LM: bidirectional on PREFIX + causal on generation
-  — Combines BERT properties (on prefix) AND GPT properties (on generation) → answer: "Both"
-★ Learned positional embeddings (GPT-2 style): CANNOT generalise to sequences longer than training length
-★ BERT 15% masking: avoids mismatch between pre-training ([MASK]) and fine-tuning (no [MASK])
-  — 80% [MASK], 10% unchanged, 10% random token
-★ Swin Transformer: SHIFTED WINDOW (local) attention → linear complexity
-★ Residual stream in Transformer = main vector that attention and FFN layers ADD to (mechanistic interp)
-★ SwiGLU (LLaMA): replaces sigmoid σ with Swish/SiLU in gated linear unit
-★ Mixture of Depths (MoD): skips certain TOKENS at some layers (adaptive compute per token)
-  — Option A type: "skip certain tokens from processing at some layers" — this is CORRECT
-  — NOT "use different model depths for different input lengths"
-★ Sliding window attention (Mistral): each token attends to w nearest tokens, O(n×w)
-★ Perceiver: cross-attends from a SMALL LATENT ARRAY to the huge input
-  — NOT sparse attention; the latent bottleneck is the key innovation
-★ T5: frames ALL tasks as text-to-text generation
-★ CFG (Classifier-Free Guidance) higher weight w → HIGHER FIDELITY, LESS DIVERSE
-  — "More diverse" is WRONG; higher w = sharper, more conditioned = less diversity
-  — guided_score = (1+w)×score_cond - w×score_uncond
+★ RoPE (Rotary Position Embedding): rotates Q and K vectors in attention computation
+  — Applies to d_k/2 dimensions per head (pairs of dims for cos/sin rotations)
+★ Prefix LM: bidirectional attention on PREFIX + causal attention on generation
+  — Combines properties of BERT (on prefix) AND GPT (on generation)
+★ Learned positional embeddings (GPT-2 style): CANNOT generalise to sequences LONGER than training length
+  — Fixed sinusoidal can extrapolate better
+★ BERT 15% masking: NOT 100% to reduce mismatch between pre-training ([MASK] tokens) and fine-tuning (no [MASK])
+  — 80% replaced with [MASK], 10% unchanged, 10% random token
+★ Causal LM: predicts NEXT token given PAST tokens
+  — MLM: predicts MASKED tokens given ALL other tokens
+★ Swin Transformer: uses SHIFTED WINDOW (local) attention for linear complexity
+★ Residual stream in Transformer = main vector that attention and FFN layers ADD to
+★ SwiGLU (used in LLaMA): replaces sigmoid σ with Swish(SiLU) in gated linear unit
+★ Mixture of Depths (MoD): skips certain tokens from processing at some layers (adaptive compute)
+  — NOT "skip certain layers"; tokens are routed, NOT layers dropped uniformly
+★ Sliding window attention: each token attends to w nearest tokens, complexity O(n×w) ≈ O(n)
  
 ▌FINE-TUNING METHODS
-★ BitFit: fine-tunes ONLY the BIAS TERMS — NOT attention weights, NOT embeddings
+★ BitFit: fine-tunes ONLY the BIAS TERMS of the model (not attention weights, not embeddings)
 ★ Prompt tuning: trains ONLY a small set of continuous prompt tokens prepended to input
+  — Does NOT fine-tune model weights
 ★ Prefix tuning: prepends trainable vectors to K and V in EACH attention layer
-  — NOT query vectors; NOT only input embeddings — keys and values (K, V)
+  — NOT the query vectors; NOT only the input embeddings
 ★ Adapter modules: inserted AFTER attention AND AFTER FFN sublayers within the residual
-★ LoRA (rank r): adds low-rank A,B matrices to frozen weights
-★ Parameter count ranking (fewest to most): BitFit < LoRA < Adapter < Prefix < Full fine-tuning
-★ Full fine-tuning: uses the MOST parameters (answer to "which uses MOST?")
+★ LoRA (rank r): adds low-rank A,B matrices; fewest new parameters among PEFT methods
+★ Full fine-tuning: uses the MOST parameters (all model weights updated)
+★ BitFit < LoRA < Adapter < Prefix tuning < Full fine-tuning  (in terms of params updated)
  
 ▌DECODING & GENERATION
-★ Temperature T→0: GREEDY decoding (argmax) — NOT uniform random
-  — T→∞: uniform distribution; T→0: one-hot on argmax
+• Temperature T→0: one-hot/argmax (greedy);  T→∞: uniform distribution
 ★ Top-k sampling k=1 = greedy decoding = beam search beam=1
-  — Both B and C is a tempting trap but: k=1 is JUST greedy (beam=1 is also greedy but asking for one answer)
-  — If options include "Both B and C", that is a valid answer when B=greedy and C=beam=1
-★ Repetition penalty: reduces probability of tokens ALREADY APPEARED in the generated sequence
-★ Beam search: NOT guaranteed globally optimal (prunes paths early)
-★ CFG higher weight w: HIGHER FIDELITY, LESS DIVERSE (NOT more diverse)
-★ Continuous batching: inserts new requests as sequences finish WITHOUT WAITING for full batch
-  — Answer is always the "without waiting / as sequences finish" option
+  — "Both B and C" is WRONG; the answer is just "greedy decoding"
+★ Repetition penalty: reduces probability of tokens that have ALREADY APPEARED in the generated sequence
+★ Beam search: NOT guaranteed to find globally optimal sequence (prunes paths early)
+★ CFG (Classifier-Free Guidance) higher weight w: HIGHER FIDELITY but LESS DIVERSE
+  — Guided score = (1+w)×score_cond - w×score_uncond
+  — Higher w → sharper/more conditioned outputs, loses diversity
  
 ▌DISTRIBUTED TRAINING & EFFICIENCY
-★ Tensor parallelism requires AllReduce (to sum partial results) per layer — NOT AllGather only
-★ ZeRO stage 3: shards optimizer states + gradients + model parameters
-★ INT4 quantisation: 8× smaller than FP32 (32 bits / 4 bits = 8×) — NOT 4×
-★ Flash Attention 2 vs FA1: better parallelism across sequence dimension + fewer non-matmul FLOPs
-★ PagedAttention (vLLM): manages KV cache in fixed-size blocks/pages → reduces fragmentation
-★ Continuous batching: insert new requests as sequences finish, without waiting — option B type
+★ Tensor parallelism: requires AllReduce (to sum partial results) per layer
+  — NOT AllGather only; NOT no communication
+★ ZeRO stage 3: shards optimizer states + gradients + model parameters across GPUs
+★ Continuous batching: insert new requests as sequences FINISH (not waiting for full batch)
+  — model said 1 = WRONG; correct = inserting without waiting
+★ Flash Attention 2 improvement over FA1: better parallelism across sequence dim + fewer non-matmul FLOPs
+★ PagedAttention (vLLM): manages KV cache in fixed-size pages/blocks → reduces fragmentation
+★ INT4 quantization: 8× smaller than FP32 (not 4×)
  
 ▌NEURAL ODE & ADVANCED
-★ Neural ODE backpropagation memory: O(1) via ADJOINT METHOD
-  — Adjoint recomputes hidden states in reverse → does NOT store all intermediate activations
-  — NOT O(depth) like ResNet — the adjoint is the key advantage
-★ MAML inner loop requires: Hessian-vector products (second-order gradients)
-★ DPO (Direct Preference Optimisation): trains WITHOUT a SEPARATE REWARD MODEL and WITHOUT RL training loop
-  — DPO DOES use human preference data — it uses preferences directly
-  — "Without human pref data" is WRONG; "without separate reward model + RL" is CORRECT
-★ Linear attention: rewrites attention as KERNEL FEATURE MAPS, changes order of operations
-  — NOT top-k weights; NOT sparse; the key is the kernel trick to change computation order
-★ Mamba / SSM: selective STATE SPACE MODEL with RECURRENT computation, linear O(n)
-  — NOT sparse attention; the recurrent structure is what gives linear complexity
+★ Neural ODE backpropagation memory: O(1) via ADJOINT METHOD (recomputes hidden states in reverse)
+  — NOT O(depth) like ResNet; the adjoint avoids storing all intermediate states
+★ MAML inner loop: requires Hessian-vector products (second-order gradients)
+★ DPO (Direct Preference Optimisation): trains LLM directly on preference data WITHOUT separate reward model AND WITHOUT RL
+  — Uses human preference data directly (option A in typical questions = WRONG if it says "without human pref data")
+★ Linear attention approximation: rewrites attention as KERNEL FEATURE MAPS, changes order of operations → O(n)
+★ Mamba / SSM: selective state space model with RECURRENT computation, linear O(n) in sequence length
  
 ▌CONTRASTIVE & SELF-SUPERVISED
-★ CLIP zero-shot classification: compare image embedding to TEXT EMBEDDINGS of class descriptions
-  — NOT fine-tuning a linear head; NOT k-NN with stored image embeddings
-  — The correct mechanism is: encode class names as text → compare to image embedding
-★ BPE (Byte-Pair Encoding) advantage over word-level tokenisation:
-  — Handles RARE and OOV words by decomposing into known subwords / characters
-  — NOT "fewer parameters needed" — BPE doesn't reduce parameter count
+★ CLIP zero-shot classification: compare image embedding to TEXT EMBEDDINGS of class name descriptions
+  — NOT fine-tuning; NOT k-NN with stored image embeddings
 ★ NT-Xent gradient for perfect positive pair (cosine_sim=1): gradient = 0 (no update needed)
-★ Score-based models learn: ∇_x log p(x) (score function = gradient of log density w.r.t. data)
-★ Normalizing flows: compute EXACT log-likelihood via change-of-variables
-  — NOT an ELBO lower bound — that is VAE, not normalizing flows
-  — Flows are EXACT; VAEs use a lower bound (ELBO)
-★ VQ-VAE: discrete codebook — encoder outputs quantised to nearest codebook vector
-★ DDIM: 50-100 steps via non-Markovian deterministic reverse process (vs DDPM's 1000)
-★ CFG higher w: HIGHER FIDELITY, LESS DIVERSE (not more diverse)
+★ Score-based generative models learn: SCORE FUNCTION ∇_x log p(x) (gradient of log density w.r.t. data)
+  — NOT p(x) directly; NOT a discriminator
+★ Normalizing flows: can compute EXACT log-likelihood via change-of-variables formula
+  — NOT just an ELBO lower bound (that is VAE); normalizing flows are EXACT
+★ VQ-VAE: uses DISCRETE CODEBOOK — encoder outputs quantised to nearest codebook vector
+★ DDIM sampling: 50-100 steps using NON-MARKOVIAN DETERMINISTIC reverse process
+  — Much fewer than DDPM's 1000 steps
  
 ▌EVALUATION & OVERFITTING
-★ High bias (underfitting): HIGH training error AND HIGH test error (BOTH high)
-★ Overfitting: LOW training error, HIGH test error (large gap between them)
-★ Training loss HIGHER than validation loss = UNDERFITTING — this is NOT a sign of overfitting
-★ Double descent: test error has a SECOND DESCENT after an initial peak near interpolation threshold
-  — The phenomenon involves TWO descents; option B "has a second descent after initial peak" is correct
+★ High bias (underfitting) characteristics: HIGH training error AND HIGH test error
+  — NOT just high test error; BOTH train and test are high
+★ Overfitting: LOW training error, HIGH test error (large gap)
 ★ Data leakage: test set information influences model training or selection
-★ MC Dropout uncertainty: run inference N times with Dropout ACTIVE and average predictions
-  — NOT training multiple models; dropout MUST be enabled (model.train() mode or F.dropout(training=True))
-  — This is option B type answer in typical questions
-★ Deep ensemble: M INDEPENDENT models from DIFFERENT random initialisations
-★ Temperature scaling (calibration): divides logits by learned scalar T on VALIDATION set
-★ Conformal prediction: provides PREDICTION SET with valid coverage guarantee (≥ 1-α)
-★ Zero-shot classification: NO examples from target classes at all — relies on descriptions or pretrained knowledge
-  — Few-shot = SMALL NUMBER of labelled examples — do NOT confuse with zero-shot
-★ Domain adaptation (unsupervised): train on LABELLED source, generalise to UNLABELLED target
+★ MC Dropout uncertainty: run inference N times with dropout ACTIVE, average predictions
+★ Deep ensemble: M INDEPENDENT models from DIFFERENT random initializations
+★ Calibration: among samples where model predicts confidence p, approximately p fraction are truly class c
+★ Temperature scaling (calibration): divides logits by learned scalar T optimized on VALIDATION set
+★ Conformal prediction: provides PREDICTION SET with valid coverage guarantee (probability ≥ 1-α)
+★ Not a sign of overfitting: training loss HIGHER than validation loss (that's underfitting)
  
 ▌GENERALISATION THEORY
-★ PAC learning sample complexity: O(1/ε × log(1/δ)) roughly
-★ No Free Lunch theorem: no single algorithm best for ALL problems
-★ Information Bottleneck: minimise I(Z;X) while maximising I(Z;Y)
+★ PAC learning sample complexity: O(1/ε × log(1/δ))  where ε=error tolerance, δ=failure probability
+★ No Free Lunch theorem: no single algorithm is best for ALL problems
+★ Information Bottleneck: minimize I(Z;X) while maximizing I(Z;Y)
 ★ CNN inductive bias: TRANSLATION EQUIVARIANCE and LOCALITY (local receptive field)
-★ Universal Approximation Theorem: 1 hidden layer + sufficient neurons approximates any continuous function on compact domain
-★ Double descent: SECOND DESCENT after initial peak (option B "has a second descent" is the answer)
+  — NOT permutation invariance (that's sets); NOT scale invariance
+★ Universal Approximation Theorem: 1 hidden layer + sufficient neurons can approximate any continuous function on compact domain
+★ Double descent: test error has a SECOND DESCENT after an initial peak near interpolation threshold
  
 ▌DOMAIN ADAPTATION & TRANSFER
 ★ Unsupervised domain adaptation: train on LABELLED source domain, generalise to UNLABELLED target domain
