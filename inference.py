@@ -32,7 +32,7 @@ warnings.filterwarnings("ignore")
 # PATHS — model weights cached locally by setup.bash
 # ============================================================
 SCRIPT_DIR   = os.path.dirname(os.path.abspath(__file__))
-HF_MODEL_ID  = "/content/gnr638/model_3b"
+HF_MODEL_ID  = "/content/gnr638/model"
 OUTPUT_PATH  = os.path.join(SCRIPT_DIR, "submission.csv")
 
 # ============================================================
@@ -62,6 +62,13 @@ These facts are AUTHORITATIVE. If your intuition contradicts them, trust this ta
   — The "+1" is the bias PER output channel, giving +out_ch total bias params
   — Example: Conv2d(in=3, out=64, k=3×3) → 64 × (3×3×3 + 1) = 64 × 28 = 1792
   — Example: Conv2d(in=3, out=64, k=3×3) WITHOUT bias → 64 × 3×3×3 = 1728
+★ Conv2D with groups: out_ch × (in_ch/groups) × k_h × k_w
+  — Example: Conv2d(32,64,k=3,groups=2,bias=False) → 64×(32/2)×3×3 = 9216
+  — Depthwise Conv2d(C,C,k,groups=C,bias=False): C × k × k
+★ TRAP — Conv2d groups=2 is NOT the same as depthwise (groups=C)
+★ ResNet-50 bottleneck block params (256→64→64→256, no bias):
+  — 1×1: 256×64=16384; 3×3: 64×64×9=36864; 1×1: 64×256=16384 → Total: 69632
+★ Multi-head attention CONCATENATED output = d_model (NOT n_heads × d_model)
 • FC (Linear) params with bias: (in_features × out_features) + out_features
 • LSTM total params: 4 × [hidden × (input + hidden) + hidden]
   — LSTM has 4 gates: input, forget, output, cell gate
@@ -82,6 +89,16 @@ These facts are AUTHORITATIVE. If your intuition contradicts them, trust this ta
 • Conv2D output: floor((input + 2×padding − kernel) / stride) + 1
   — Example: input=32, k=5, s=1, p=0 → floor((32+0−5)/1)+1 = 28
   — Example: input=64, k=3, s=2, p=1 → floor((64+2−3)/2)+1 = floor(63/2)+1 = 32
+★ FULL dilation formula: floor((in + 2p - d*(k-1) - 1) / s) + 1
+  — Example: in=15, k=3, s=1, p=0, d=3 → floor((15-3*(3-1)-1)/1)+1 = 9
+- ConvTranspose2d: output = (input-1)×stride - 2×padding + kernel
+★ Dilated conv effective size: dilation×(kernel−1)+1
+  — k=3, dilation=2 → 5×5;  k=3, dilation=3 → 7×7
+★ GlobalAvgPool on (B,C,H,W) → (B,C,1,1)  NOT (B,C)
+★ nn.Linear on (B,...,in) → (B,...,out) — ONLY last dimension changes
+★ nn.Flatten(start_dim=1) on (B,C,H,W) → (B, C×H×W)
+  — Example: (8,16,4,4) → (8, 256)  NOT 16
+★ nn.AdaptiveAvgPool2d((1,1)) on (B,C,H,W) → (B,C,1,1)
 • MaxPool output: floor((input − kernel) / stride) + 1  (assuming p=0)
   — Example: input=32, k=2, s=2 → floor((32−2)/2)+1 = 16
   — Example: input=4,  k=2, s=2 → floor((4−2)/2)+1  = 2
@@ -94,6 +111,10 @@ These facts are AUTHORITATIVE. If your intuition contradicts them, trust this ta
   — If batch size is B: total FLOPs = B × 2 × M × N
   ★ For a batch of B samples through Linear(M,N): answer is B×M×N (multiply-accumulate) or 2×B×M×N (full FLOPs)
   — Pick the option that matches B×M×N; do NOT pick B×N or M×N alone
+★ Matrix multiply A(m×k) × B(k×n): FLOPs ≈ m×k×n (INNER dimension k always in formula)
+★ FLOPs for DEPTHWISE Conv: C × K × K × H_out × W_out
+  — Example: C=32, k=3×3, H_out=8, W_out=8 → 32×9×64 = 18432
+- Attention QKᵀ FLOPs ≈ n²×d (quadratic in sequence length)
 • FLOPs for Conv2D output spatial H_out×W_out, with kernel k×k, in_ch C_in, out_ch C_out:
   — per output element: 2 × C_in × k × k  (MAC operations)
   — total: 2 × C_in × k² × C_out × H_out × W_out
@@ -226,7 +247,13 @@ These facts are AUTHORITATIVE. If your intuition contradicts them, trust this ta
   — Occurs because gradient updates for new task overwrite weights learned for old tasks
 • Fine-tuning pretrained CNN on small dataset: freeze EARLY conv layers (low-level features) first
 • Chest X-ray augmentation: VERTICAL FLIP is inappropriate (breaks anatomical orientation)
- 
+
+▌SELF-ATTENTION COMPLEXITY
+• Self-attention compares ALL pairs of tokens
+    ★ Time complexity = O(n²)
+    ★ Memory complexity = O(n²)
+• NEVER O(n log n), NEVER O(n)
+
 ▌TRANSFORMERS & SELF-SUPERVISED
 • Original Transformer positional encoding: FIXED sinusoidal functions of position
 • Weight tying: input embedding matrix tied to output projection layer
@@ -234,7 +261,61 @@ These facts are AUTHORITATIVE. If your intuition contradicts them, trust this ta
 • SimCLR NT-Xent: same image different augmentations → similar; different images → far apart
 • Knowledge distillation soft targets: carry inter-class similarity information
 • VAE reparameterisation trick: makes sampling differentiable for backpropagation
- 
+
+▌NUMERICAL VALUES
+★ exp(0)=1; exp(1)≈2.718; exp(-1)≈0.368; exp(-2)≈0.135
+  — sigmoid(-1) ≈ 0.269 (NOT 0.5, NOT 0.368)
+  — sigmoid(0) = 0.5
+  — -ln(0.368) ≈ 1.0
+- log(1)=0 (any base);  ln(e)=1
+★ Sigmoid range: OPEN (0,1) — NEVER exactly 0 or 1
+  — "exclusive" is correct; "[0,1] inclusive" is WRONG
+★ Cosine similarity for non-zero vectors: range is [-1, 1] (includes negatives)
+  — Anti-parallel = -1; orthogonal = 0; parallel = +1
+  — WRONG to say range is [0,1]
+- softmax([c,c,...,c]) = [1/n,...,1/n] for any constant c
+
+▌SOFTMAX & LOG-SUM-EXP
+- log-sum-exp trick: log(Σexp(z_i)) = max(z) + log(Σexp(z_i - max(z)))
+★ T→0: GREEDY (argmax) — NOT uniform. T→∞: uniform — NOT greedy.
+★ Softmax Jacobian: diagonal = s_i(1-s_i); off-diagonal = -s_i×s_j (NEGATIVE)
+
+▌NORMALISATION 
+★ Forgetting model.eval(): BN uses mini-batch stats from inference batch instead of running stats
+★ BatchNorm batch_size=1 during training: undefined (variance=0, division by zero)
+★ LayerNorm with batch_size=1: works correctly (normalises over features, not batch)
+★ BN epsilon ε: added to variance before sqrt → prevents division by zero
+★ Running stats updated via EMA: running = (1-m)×running + m×batch_mean
+  — NOT simply equal to batch_mean; NOT updated during eval
+
+▌OPTIMISERS
+- Adam: beta1 = first moment (mean); beta2 = second moment (variance)
+- Adam bias correction at t=1, β=0.9: m̂ = m/0.1 = 10×m (scales UP by 10)
+- He init: std = sqrt(2/fan_in); Xavier: std = sqrt(2/(fan_in+fan_out))
+★ One Cycle LR: LR increases to max then DECREASES
+★ Training loss > validation loss = UNDERFITTING (NOT overfitting)
+
+▌PYTORCH SPECIFICS
+★ model.train() during inference: stochastic + inaccurate (NOT "freeze params")
+★ nn.Dropout vs F.dropout:
+  — nn.Dropout: respects train/eval AUTOMATICALLY → SAFER
+  — F.dropout: requires explicit training=True/False → less safe
+- torch.tensor: infers dtype from data
+- torch.Tensor: always FloatTensor
+- backward() twice without zero_grad(): gradients ACCUMULATE
+★ BF16 vs FP16: BF16 has same exponent bits as FP32 (8 bits) → larger DYNAMIC RANGE
+  — FP16: 5 exponent bits → smaller dynamic range
+  — BF16 advantage = DYNAMIC RANGE (NOT precision)
+- Embedding layer gradients: only for rows in CURRENT batch
+
+▌FINE-TUNING METHODS
+★ BitFit: fine-tunes ONLY BIAS TERMS
+★ Prompt tuning: trains only continuous prompt tokens prepended to input
+★ Prefix tuning: prepends trainable vectors to K and V in EACH attention layer (NOT Q)
+★ Adapter modules: inserted AFTER attention AND AFTER FFN sublayers
+★ LoRA (rank r): adds low-rank A,B matrices to frozen weights
+★ Parameter count ranking (fewest→most): BitFit < LoRA < Adapter < Prefix < Full fine-tuning
+★ Full fine-tuning: uses the MOST parameters
 
 ════════════════════════════════════════════════
 STEP 2 — SOLVE the question carefully
