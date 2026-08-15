@@ -1,39 +1,58 @@
+# Deep Learning Visual MCQ Solver
 
-# GNR638 Assignment2 – its in assignment2 branch and Readme of that contains how to evaluate that
-# GNR638 Assignment – Model Evaluation Guide
+An AI-powered system for solving image-based multiple-choice questions in deep learning and related mathematical topics using a vision-language model.
 
-This repository contains the codebase for building the C++ backend and evaluating two models on a given dataset.
+## Overview
 
-Follow the steps below to set up the environment and run the evaluation scripts.
+The system takes images containing multiple-choice questions with four options and predicts the correct option automatically.
 
----
+The pipeline combines:
 
-## 📦 Setup Instructions
+- Image preprocessing for improved question readability
+- Vision-language model based reasoning
+- Domain-specific deep learning and mathematics knowledge
+- Confidence-based answer filtering
+- Robust answer extraction
+- 4-bit model quantization for memory-efficient inference
+- Automatic generation of a submission CSV
 
-### 1. Download and Extract
+The model is instructed to carefully read all four options, solve the question, verify the alternatives, and provide a confidence estimate before selecting an answer.
 
-- Download the ZIP folder.
-- Extract it to your desired location.
+## Pipeline
 
----
-
-### 2. Open Command Prompt / Terminal
-
-Navigate to the extracted folder:
-
-```bash
-cd gnr638-master
-
-cd framework/cpp
-py setup.py build_ext --inplace
-cd ../..
-```
-To test model 1: run 
-```bash
-py model1_eval.py {datasetpath} outputs/model_weights.txt
-```
-To test model 2: run
-```bash
-py model2_eval.py {dataset} best_model.pkl
-```
-Note : for data2 model and training are both included in train_data2.py while for data1 they are separate
+```text
+Question Image
+      │
+      ▼
+Image Preprocessing
+      │
+      ├── Auto-inversion
+      ├── Deskewing
+      ├── Whitespace cropping
+      ├── Super-resolution
+      ├── Contrast enhancement
+      └── Sharpness enhancement
+      │
+      ▼
+Qwen2.5-VL
+      │
+      ├── Read question and options
+      ├── Apply relevant formulas/facts
+      ├── Solve the question
+      ├── Verify all options
+      └── Estimate confidence
+      │
+      ▼
+Confidence Gate
+      │
+      ├── LOW → Skip / output 5
+      └── HIGH/MEDIUM
+             │
+             ▼
+      Answer Extraction
+             │
+             ▼
+      Option 1 / 2 / 3 / 4
+             │
+             ▼
+       submission.csv
